@@ -102,15 +102,7 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr iss3d( pcl::PointCloud<pcl::PointXYZRGB>:
     iss_detector.setThreshold32 (Threshold32);
     iss_detector.setMinNeighbors (setMinNeighbors);
     iss_detector.setNumberOfThreads (setNumberOfThreads);
-/*
-    iss_detector.setSalientRadius (6 * cloud_resolution);
-    iss_detector.setNonMaxRadius (4 * cloud_resolution);
 
-    iss_detector.setThreshold21 (0.99);//0.975
-    iss_detector.setThreshold32 (0.99);
-    iss_detector.setMinNeighbors (5);
-    iss_detector.setNumberOfThreads (1);
-    */
     iss_detector.setInputCloud (cloud);
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr kpts( new pcl::PointCloud<pcl::PointXYZRGB>() );
     iss_detector.compute(*kpts);

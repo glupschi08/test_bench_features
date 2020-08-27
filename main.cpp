@@ -1,9 +1,3 @@
-//todo check which kind of descriptor is used (RGB or regular)
-//todo visualize evaluation region! with a  sample point
-//todo check which matrix is used for the evaluation and which one for the visualization
-//todo color after adding the noise and the rotation! otherwise no fair results
-//todo check if the rotation is applied correctly in the evaluation function
-//todo add option to adjust the visualization offset sepperatly from the actual offset
 
 #include <fstream>
 #include <iostream>
@@ -59,6 +53,25 @@
 #include <pcl/registration/correspondence_rejection_distance.h>
 #include <pcl/registration/transformation_estimation_svd.h>
 
+
+
+//#include "features.h"
+
+//features
+#include <pcl/features/normal_3d.h>
+#include <pcl/features/normal_3d_omp.h>
+#include <pcl/features/integral_image_normal.h>
+#include <pcl/features/pfh.h>
+#include <pcl/features/pfhrgb.h>
+#include <pcl/features/fpfh.h>
+#include <pcl/features/fpfh_omp.h>
+#include <pcl/features/rsd.h>
+#include <pcl/features/shot_omp.h>
+#include <pcl/features/shot.h>
+#include <pcl/features/3dsc.h>
+#include <pcl/features/rift.h>
+#include <pcl/features/intensity_gradient.h>
+
 //own added
 #include <random>
 #include <chrono>
@@ -67,6 +80,8 @@
 #include "keypoints.h"
 #include <cxxopts.hpp> //for arg input
 #include <pcl/common/transforms.h>
+
+
 
 #include <fstream> //write to file
 #include <cmath> //to get absolute values
@@ -80,6 +95,73 @@
 #include <pcl/keypoints/harris_6d.h>
 
 
+//------------------------------------------------------------------------------------------------------------------------------
+#include <pcl/console/parse.h>
+#include <pcl/console/print.h>
+#include <pcl/console/time.h>
+#include <pcl/features/normal_3d.h>
+#include <pcl/features/normal_3d_omp.h>
+#include <pcl/features/integral_image_normal.h>
+#include <pcl/features/pfh.h>
+#include <pcl/features/pfhrgb.h>
+#include <pcl/features/fpfh.h>
+#include <pcl/features/fpfh_omp.h>
+#include <pcl/features/rsd.h>
+#include <pcl/features/shot_omp.h>
+#include <pcl/features/shot.h>
+#include <pcl/features/3dsc.h>
+#include <pcl/features/rift.h>
+#include <pcl/features/intensity_gradient.h>
+#include <pcl/point_types_conversion.h>
+#include <pcl/kdtree/kdtree_flann.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/visualization/pcl_visualizer.h>
+#include <pcl/filters/uniform_sampling.h>
+
+
+#include <iostream>
+#include <string>
+
+//addional libs
+#include <vector>
+#include <Eigen/Core>
+#include <iostream>
+#include <pcl/io/pcd_io.h>
+#include <pcl/console/parse.h>
+#include <pcl/console/print.h>
+#include <pcl/console/time.h>
+#include <pcl/common/common.h>
+#include "pcl/filters/voxel_grid.h"
+#include <pcl/registration/transforms.h>
+#include <pcl/visualization/pcl_visualizer.h>
+#include "pcl/kdtree/impl/kdtree_flann.hpp"
+#include <pcl/keypoints/harris_3d.h>
+#include <stdlib.h>
+#include <pcl/console/time.h>
+#include <pcl/keypoints/iss_3d.h>
+#include <pcl/features/usc.h>
+
+//own_libs
+//#include "overlap.h"
+//#include "keypoints.h"
+
+//for rejection
+#include <pcl/registration/correspondence_estimation.h>
+#include <pcl/registration/correspondence_estimation.h>
+#include <pcl/registration/correspondence_rejection_sample_consensus.h>
+#include <pcl/registration/correspondence_rejection_distance.h>
+#include <pcl/registration/correspondence_rejection_sample_consensus.h>
+#include <pcl/registration/correspondence_rejection_distance.h>
+#include <pcl/registration/correspondence_rejection_median_distance.h>
+#include <pcl/registration/correspondence_rejection_surface_normal.h>
+#include <pcl/keypoints/iss_3d.h>
+//#define RANSAC_Inlier_Threshold 3.//1.5 //0.1
+//#define RANSAC_Iterations 5000
+
+
+
+//--------------------------------
 using namespace std;
 
 //nice results with in 7s
@@ -91,31 +173,735 @@ using namespace std;
 #define LEAF_SIZE .1    //for the sampling of the cloud -> 0.1 no filtering applied
 
 //for computing the normals
-#define normal_radius 5//1.2 //0.25  -> very good results with 0.25, 5, 10 and feature radius10.25
+//#define normal_radius 5;//1.2 //0.25  -> very good results with 0.25, 5, 10 and feature radius10.25
 
 //  for compute_PFHRGB_features
 // IMPORTANT: the radius used here has to be larger than the radius used to estimate the surface normals!!!
-#define feature_radius 5.25//3.25  //0.25
+//#define feature_radius 5.25//3.25  //0.25
 
 
 #define RANSAC_Inlier_Threshold 3.//1.5 //0.1
 #define RANSAC_Iterations 5000
 #define CorrRejDist_Maximum_Distance 5
 #define ICP_Max_Correspondence_Distance 0.15
+//--------------------------------
 
-// Parameters for sift computation
-/*
-#define min_scale 0.2
-#define nr_octaves 4
-#define nr_scales_per_octave 5
-#define min_contrast 0.25
+/// normal vector extraction
+///
+/// cloud       -- input point cloud
+/// kpts        -- input keypoints
+///
+pcl::PointCloud<pcl::Normal>::Ptr normal_extraction( pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud,
+                                                     pcl::PointCloud<pcl::PointXYZRGB>::Ptr kpts, float normal_radius) {
+pcl::console::TicToc tt;
+tt.tic();
+pcl::NormalEstimation<pcl::PointXYZRGB, pcl::Normal> ne;
+ne.setInputCloud( kpts );
+pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree( new pcl::search::KdTree<pcl::PointXYZRGB>() );
+ne.setSearchMethod( tree );
+//ne.setSearchSurface( cloud );
+pcl::PointCloud<pcl::Normal>::Ptr normals( new pcl::PointCloud<pcl::Normal>() );
+ne.setRadiusSearch( normal_radius); //0.1
+ne.compute( *normals );
+double t = tt.toc();
+pcl::console::print_value( "Normal extraction takes %.3f\n", t );
+return normals;
+}
+
+/// normal vector extraction in omp
+///
+/// cloud       -- input point cloud
+/// kpts        -- input keypoints
+///
+pcl::PointCloud<pcl::Normal>::Ptr normal_extraction_omp( pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud,
+                                                         pcl::PointCloud<pcl::PointXYZRGB>::Ptr kpts, float normal_radius) {
+pcl::console::TicToc tt;
+tt.tic();
+pcl::NormalEstimationOMP<pcl::PointXYZRGB, pcl::Normal> ne;
+ne.setInputCloud( kpts );
+pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree( new pcl::search::KdTree<pcl::PointXYZRGB>() );
+ne.setSearchMethod( tree );
+ne.setSearchSurface( cloud );
+pcl::PointCloud<pcl::Normal>::Ptr normals( new pcl::PointCloud<pcl::Normal>() );
+ne.setRadiusSearch( normal_radius );//0.1
+ne.compute( *normals );
+double t = tt.toc();
+pcl::console::print_value( "Normal extraction in OMP takes %.3f\n", t );
+return normals;
+}
+
+/// normal vector extraction using integral image
+///
+/// cloud       -- input point cloud
+///
+pcl::PointCloud<pcl::Normal>::Ptr normal_extraction_integral_image(
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud,
+        float MaxDepthChangeFactor) {
+    pcl::console::TicToc tt;
+    tt.tic();
+    pcl::IntegralImageNormalEstimation<pcl::PointXYZRGB, pcl::Normal> ne;
+    ne.setNormalEstimationMethod (ne.AVERAGE_3D_GRADIENT);
+    ne.setMaxDepthChangeFactor(MaxDepthChangeFactor);//0.03f
+//  ne.setNormalSmoothingSize(10.0f);
+    ne.setInputCloud(cloud);
+    pcl::PointCloud<pcl::Normal>::Ptr normals( new pcl::PointCloud<pcl::Normal>() );
+    ne.compute( *normals );
+    double t = tt.toc();
+    pcl::console::print_value( "Normal extraction using integral image(%d points) takes %.3f\n", (int)normals->size(), t );
+    return normals;
+}
+
+/// Persistent Feature Histogram
+///
+/// cloud         -- input point cloud
+/// kpts          -- keypoints
+///
+pcl::PointCloud<pcl::PFHSignature125>::Ptr pfh_extraction(
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr rgb_cloud,
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr rgb_kpts,
+        pcl::PointCloud<pcl::Normal>::Ptr normals ,
+        float feature_radius){
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud( new pcl::PointCloud<pcl::PointXYZ>() );
+    pcl::PointCloud<pcl::PointXYZ>::Ptr kpts( new pcl::PointCloud<pcl::PointXYZ>() );
+    pcl::copyPointCloud( *rgb_cloud, *cloud );
+    pcl::copyPointCloud( *rgb_kpts, *kpts );
+    pcl::console::TicToc tt;
+    tt.tic();
+    pcl::PFHEstimation<pcl::PointXYZ, pcl::Normal, pcl::PFHSignature125> pfh_extraction;
+    pfh_extraction.setSearchSurface( cloud );
+    pfh_extraction.setInputCloud( kpts );
+    pfh_extraction.setInputNormals( normals );
+    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>());
+    pfh_extraction.setSearchMethod( tree );
+    pfh_extraction.setRadiusSearch( feature_radius); //0.05;
+    pcl::PointCloud<pcl::PFHSignature125>::Ptr descrs( new pcl::PointCloud<pcl::PFHSignature125>() );
+    pfh_extraction.compute( *descrs );
+    double t = tt.toc();
+    pcl::console::print_value( "Persistent Feature Histogram takes %.3f\n", t );
+    return descrs;
+}
+
+
+
+void compute_PFHRGB_features(pcl::PointCloud <pcl::PointXYZRGB>::Ptr &cloud,
+                             pcl::PointCloud <pcl::Normal>::Ptr &normals,
+                             pcl::PointCloud <pcl::PointWithScale>::Ptr &keypoints,
+                             pcl::PointCloud <pcl::PFHRGBSignature250>::Ptr &descriptors_out,
+                             double feature_radius) {
+
+    // copy only XYZ data of keypoints for use in estimating features
+    pcl::PointCloud <pcl::PointXYZRGB>::Ptr keypoints_xyzrgb(new pcl::PointCloud <pcl::PointXYZRGB>);
+    pcl::copyPointCloud(*keypoints, *keypoints_xyzrgb);
+
+    // Create the PFH estimation class, and pass the input dataset+normals to it
+    pcl::PFHRGBEstimation<pcl::PointXYZRGB, pcl::Normal, pcl::PFHRGBSignature250> pfhrgbEstimation;
+
+    pfhrgbEstimation.setInputCloud(keypoints_xyzrgb);
+    pfhrgbEstimation.setSearchSurface(cloud); // use all points for analyzing local cloud structure
+    pfhrgbEstimation.setInputNormals(normals);
+    // alternatively, if cloud is of tpe PointNormal, do pfh.setInputNormals (cloud);
+
+    // Create an empty kdtree representation, and pass it to the PFH estimation object.
+    // Its content will be filled inside the object, based on the given input dataset (as no other search surface is given).
+    pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB>());
+    pfhrgbEstimation.setSearchMethod(tree);
+    //pfhrgbEstimation.setKSearch(100);
+
+    // Use all neighbors in a sphere of radius radius
+    // IMPORTANT: the radius used here has to be larger than the radius used to estimate the surface normals!!!
+    pfhrgbEstimation.setRadiusSearch(feature_radius);
+
+    // Compute the features
+    pfhrgbEstimation.compute(*descriptors_out);
+
+}
+
+
+
+/// Persistent Feature Histogram
+///
+/// cloud         -- input point cloud
+/// kpts          -- keypoints
+/// normals       -- normals
+///
+pcl::PointCloud<pcl::PFHRGBSignature250>::Ptr pfhrgb_extraction(
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud,
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr kpts,
+        pcl::PointCloud<pcl::Normal>::Ptr normals,
+        double setRadiusSearch){
+    pcl::console::TicToc tt;
+    tt.tic();
+    pcl::PFHRGBEstimation<pcl::PointXYZRGB, pcl::Normal, pcl::PFHRGBSignature250> pfh_extraction;
+    pfh_extraction.setSearchSurface( cloud );
+    pfh_extraction.setInputCloud( kpts );
+    pfh_extraction.setInputNormals( normals );
+    pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB>());
+    pfh_extraction.setSearchMethod( tree );
+    pfh_extraction.setRadiusSearch( setRadiusSearch );//0.05
+    pcl::PointCloud<pcl::PFHRGBSignature250>::Ptr descrs( new pcl::PointCloud<pcl::PFHRGBSignature250>() );
+    pfh_extraction.compute( *descrs );
+    double t = tt.toc();
+    pcl::console::print_value( "Persistent Feature Histogram RGB takes %.3f\n", t );
+    return descrs;
+}
+
+/// Fast Persistent Feature Histogram
+///
+/// cloud         -- input point cloud
+/// kpts          -- keypoints
+/// normals       -- normals
+///
+pcl::PointCloud<pcl::FPFHSignature33>::Ptr fpfh_extraction(
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud,
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr kpts,
+        pcl::PointCloud<pcl::Normal>::Ptr normals,
+        double setRadiusSearch) {
+    pcl::console::TicToc tt;
+    tt.tic();
+    pcl::FPFHEstimation<pcl::PointXYZRGB, pcl::Normal, pcl::FPFHSignature33 > fpfh_extraction;
+    fpfh_extraction.setSearchSurface( cloud );
+    fpfh_extraction.setInputCloud( kpts );
+    fpfh_extraction.setInputNormals( normals );
+    pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB>());
+    fpfh_extraction.setSearchMethod( tree );
+    fpfh_extraction.setRadiusSearch( setRadiusSearch );//0.05
+    pcl::PointCloud<pcl::FPFHSignature33>::Ptr descrs( new pcl::PointCloud<pcl::FPFHSignature33>() );
+    fpfh_extraction.compute( *descrs );
+    double t = tt.toc();
+    pcl::console::print_value( "Fast Persistent Feature Histogram takes %.3f\n", t );
+    return descrs;
+}
+
+
+/// Fast Persistent Feature Histogram in OMP
+///
+/// cloud         -- input point cloud
+/// kpts          -- keypoints
+/// normals       -- normals
+///
+pcl::PointCloud<pcl::FPFHSignature33>::Ptr fpfh_extraction_omp(
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud,
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr kpts,
+        pcl::PointCloud<pcl::Normal>::Ptr normals,
+        double setRadiusSearch) {
+    pcl::console::TicToc tt;
+    tt.tic();
+    pcl::FPFHEstimationOMP<pcl::PointXYZRGB, pcl::Normal, pcl::FPFHSignature33 > fpfh_extraction;
+    fpfh_extraction.setSearchSurface( cloud );
+    fpfh_extraction.setInputCloud( kpts );
+    fpfh_extraction.setInputNormals( normals );
+    pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB>());
+    fpfh_extraction.setSearchMethod( tree );
+    fpfh_extraction.setRadiusSearch( setRadiusSearch );//0.05
+    pcl::PointCloud<pcl::FPFHSignature33>::Ptr descrs( new pcl::PointCloud<pcl::FPFHSignature33>() );
+    fpfh_extraction.compute( *descrs );
+    double t = tt.toc();
+    pcl::console::print_value( "Fast Persistent Feature Histogram in OMP takes %.3f\n", t );
+    return descrs;
+}
+
+
+/// Signature of Hitograms of OrientTation, XYZ
+///
+/// cloud         -- input point cloud
+/// kpts          -- keypoints
+/// normals       -- normals
+///
+pcl::PointCloud<pcl::SHOT352>::Ptr shot_extraction(
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr rgb_cloud,
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr rgb_kpts,
+        pcl::PointCloud<pcl::Normal>::Ptr normals,
+        double setRadiusSearch_SHOT) {
+    // convert point cloud type
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud( new pcl::PointCloud<pcl::PointXYZ>() );
+    pcl::PointCloud<pcl::PointXYZ>::Ptr kpts( new pcl::PointCloud<pcl::PointXYZ>() );
+    pcl::copyPointCloud( *rgb_cloud, *cloud );
+    pcl::copyPointCloud( *rgb_kpts, *kpts );
+
+    pcl::console::TicToc tt;
+    tt.tic();
+
+    pcl::SHOTEstimation<pcl::PointXYZ, pcl::Normal, pcl::SHOT352> shot_extraction;
+    shot_extraction.setInputCloud( kpts );
+    shot_extraction.setSearchSurface( cloud );
+    shot_extraction.setInputNormals( normals );
+    shot_extraction.setRadiusSearch( setRadiusSearch_SHOT );//0.05
+
+    pcl::PointCloud<pcl::SHOT352>::Ptr descrs( new pcl::PointCloud<pcl::SHOT352>() );
+    shot_extraction.compute( *descrs );
+
+    double t = tt.toc();
+    pcl::console::print_value( "Signature of Hitograms of OrientTation takes %.3f\n", t );
+
+    return descrs;
+}
+
+
+/// Signature of Hitograms of OrientTation, XYZ in OMP
+///
+/// cloud         -- input point cloud
+/// kpts          -- keypoints
+/// normals       -- normals
+///
+pcl::PointCloud<pcl::SHOT352>::Ptr shot_extraction_omp(
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr rgb_cloud,
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr rgb_kpts,
+        pcl::PointCloud<pcl::Normal>::Ptr normals,
+        double setRadiusSearch_SHOT) {
+    // convert point cloud type
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud( new pcl::PointCloud<pcl::PointXYZ>() );
+    pcl::PointCloud<pcl::PointXYZ>::Ptr kpts( new pcl::PointCloud<pcl::PointXYZ>() );
+    pcl::copyPointCloud( *rgb_cloud, *cloud );
+    pcl::copyPointCloud( *rgb_kpts, *kpts );
+
+    pcl::console::TicToc tt;
+    tt.tic();
+
+    pcl::SHOTEstimationOMP<pcl::PointXYZ, pcl::Normal, pcl::SHOT352> shot_extraction;
+    shot_extraction.setInputCloud( kpts );
+    shot_extraction.setSearchSurface( cloud );
+    shot_extraction.setInputNormals( normals );
+    shot_extraction.setRadiusSearch(setRadiusSearch_SHOT );//0.05
+
+    pcl::PointCloud<pcl::SHOT352>::Ptr descrs( new pcl::PointCloud<pcl::SHOT352>() );
+    shot_extraction.compute( *descrs );
+
+    double t = tt.toc();
+    pcl::console::print_value( "Signature of Hitograms of OrientTation in OMP takes %.3f\n", t );
+
+    return descrs;
+}
+
+
+/// Signature of Hitograms of OrientTation, XYZRGB
+///
+/// cloud         -- input point cloud
+/// kpts          -- keypoints
+/// normals       -- normals
+///
+pcl::PointCloud<pcl::SHOT1344>::Ptr cshot_extraction(
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud,
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr kpts,
+        pcl::PointCloud<pcl::Normal>::Ptr normals,
+        double setRadiusSearch_SHOT) {
+    pcl::console::TicToc tt;
+    tt.tic();
+
+    pcl::SHOTColorEstimation<pcl::PointXYZRGB, pcl::Normal, pcl::SHOT1344> shot_extraction;
+    shot_extraction.setInputCloud( kpts );
+    shot_extraction.setSearchSurface( cloud );
+    shot_extraction.setInputNormals( normals );
+    shot_extraction.setRadiusSearch( setRadiusSearch_SHOT );  //0.05
+
+    pcl::PointCloud<pcl::SHOT1344>::Ptr descrs( new pcl::PointCloud<pcl::SHOT1344>() );
+    shot_extraction.compute( *descrs );
+
+    double t = tt.toc();
+    pcl::console::print_value( "Color Signature of Hitograms of OrientTation takes %.3f\n", t );
+
+    return descrs;
+}
+
+
+/// Signature of Hitograms of OrientTation, XYZRGB in OMP
+///
+/// cloud         -- input point cloud
+/// kpts          -- keypoints
+/// normals       -- normals
+///
+pcl::PointCloud<pcl::SHOT1344>::Ptr cshot_extraction_omp(
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud,
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr kpts,
+        pcl::PointCloud<pcl::Normal>::Ptr normals,
+        double setRadiusSearch_SHOT) {
+    pcl::console::TicToc tt;
+    tt.tic();
+
+    pcl::SHOTColorEstimationOMP<pcl::PointXYZRGB, pcl::Normal, pcl::SHOT1344> shot_extraction;
+    shot_extraction.setInputCloud( kpts );
+    shot_extraction.setSearchSurface( cloud );
+    shot_extraction.setInputNormals( normals );
+    shot_extraction.setRadiusSearch( setRadiusSearch_SHOT );  //0.05
+
+    pcl::PointCloud<pcl::SHOT1344>::Ptr descrs( new pcl::PointCloud<pcl::SHOT1344>() );
+    shot_extraction.compute( *descrs );
+
+    double t = tt.toc();
+    pcl::console::print_value( "Color Signature of Hitograms of OrientTation in OMP takes %.3f\n", t );
+
+    return descrs;
+}
+
+
+/// Radius-Based Surface Descriptor
+///
+/// cloud         -- input point cloud
+/// kpts          -- keypoints
+/// normals       -- normals
+///
+pcl::PointCloud<pcl::PrincipalRadiiRSD>::Ptr rsd_extraction(
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud,
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr kpts,
+        pcl::PointCloud<pcl::Normal>::Ptr normals,
+        double setRadiusSearch_RSD,
+        double setPlaneRadius_RSD) {
+    pcl::console::TicToc tt;
+    tt.tic();
+
+    pcl::RSDEstimation< pcl::PointXYZRGB, pcl::Normal, pcl::PrincipalRadiiRSD > rsd_extraction;
+    rsd_extraction.setInputCloud( kpts );
+    rsd_extraction.setSearchSurface(cloud);
+    rsd_extraction.setInputNormals( normals );
+
+    rsd_extraction.setRadiusSearch( setRadiusSearch_RSD );//0.05
+    rsd_extraction.setPlaneRadius( setPlaneRadius_RSD );//0.01
+    rsd_extraction.setSaveHistograms( false );
+
+    pcl::PointCloud<pcl::PrincipalRadiiRSD>::Ptr descrs( new pcl::PointCloud<pcl::PrincipalRadiiRSD>() );
+    rsd_extraction.compute( *descrs );
+    double t = tt.toc();
+    pcl::console::print_value( "Radius-Based Surface Descriptor takes %.3f\n", t );
+
+    return descrs;
+}
+
+/// 3D Shape Context
+///
+/// cloud         -- input point cloud
+/// kpts          -- keypoints
+/// normals       -- normals
+///
+pcl::PointCloud<pcl::ShapeContext1980>::Ptr sc_extraction(
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud,
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr kpts,
+        pcl::PointCloud<pcl::Normal>::Ptr normals,
+        double setRadiusSearch_Shape,
+        double setMinimalRadius_div,
+        double setPointDensityRadius_div) {
+
+    pcl::console::TicToc tt;
+    tt.tic();
+    pcl::ShapeContext3DEstimation< pcl::PointXYZRGB, pcl::Normal, pcl::ShapeContext1980 > sc_extraction;
+    sc_extraction.setInputCloud( kpts );//kpts
+    sc_extraction.setSearchSurface(cloud);//cloud
+    sc_extraction.setInputNormals( normals );//normals
+
+    sc_extraction.setRadiusSearch( setRadiusSearch_Shape );//0.05
+    sc_extraction.setMinimalRadius(setRadiusSearch_Shape / setMinimalRadius_div);//0.05/10.0
+    sc_extraction.setPointDensityRadius(setRadiusSearch_Shape / setPointDensityRadius_div);//0.05 / 5.0
+
+    pcl::PointCloud<pcl::ShapeContext1980>::Ptr descrs( new pcl::PointCloud<pcl::ShapeContext1980>() );
+    sc_extraction.compute( *descrs );
+    double t = tt.toc();
+    pcl::console::print_value( "3D Shape Context takes %.3f\n", t );
+
+    return descrs;
+
+}
+
+/// Unique Shape Context descriptor
+///
+/// cloud         -- input point cloud
+/// kpts          -- keypoints
+/// normals       -- normals
+///
+pcl::PointCloud<pcl::UniqueShapeContext1960>::Ptr usc_extraction(
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud,
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr kpts,
+        pcl::PointCloud<pcl::Normal>::Ptr normals,
+        double RadiusSearch,
+        double setMinimalRadius_div,
+        double setPointDensityRadius_div,
+        double LocalRadiusSearch) {
+
+    pcl::console::TicToc tt;
+    tt.tic();
+
+    // USC estimation object.
+    pcl::UniqueShapeContext<pcl::PointXYZRGB, pcl::UniqueShapeContext1960, pcl::ReferenceFrame> usc;
+    //usc.setInputCloud(kpts);
+    usc.setInputCloud(cloud);
+    // Search radius, to look for neighbors. It will also be the radius of the support sphere.
+    usc.setRadiusSearch(RadiusSearch);//0.05
+    // The minimal radius value for the search sphere, to avoid being too sensitive
+    // in bins close to the center of the sphere.
+    usc.setMinimalRadius(RadiusSearch / setMinimalRadius_div);//0.05 / 10.0
+    // Radius used to compute the local point density for the neighbors
+    // (the density is the number of points within that radius).
+    usc.setPointDensityRadius(RadiusSearch / setPointDensityRadius_div);//0.05 / 5.0
+    // Set the radius to compute the Local Reference Frame.
+    usc.setLocalRadius(LocalRadiusSearch);//0.05
+    pcl::PointCloud<pcl::UniqueShapeContext1960>::Ptr descrs( new pcl::PointCloud<pcl::UniqueShapeContext1960>() );
+    usc.compute(*descrs);
+
+    double t = tt.toc();
+    pcl::console::print_value( "3D Shape Context takes %.3f\n", t );
+    return descrs;
+}
+
+
+/// Rotation-Invariant Feature Transform
+///
+/// cloud         -- input point cloud
+/// kpts          -- keypoints
+/// normals       -- normals
+///
+typedef pcl::Histogram<32> RIFT32;
+pcl::PointCloud<RIFT32 >::Ptr rift_extraction( pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud,
+                                               pcl::PointCloud<pcl::PointXYZRGB>::Ptr kpts,
+                                               pcl::PointCloud<pcl::Normal>::Ptr normals,
+                                               double GradientEstimationsetRadiusSearch,
+                                               double RadiusSearch,
+                                               double NrDistanceBins,
+                                               double NrGradientBins) {
+
+    pcl::console::TicToc tt;
+    tt.tic();
+
+    //pcl::console::print_value( "test\n" );
+    // Convert the RGB to intensity.
+    pcl::PointCloud<pcl::PointXYZI>::Ptr intensity_cloud(new pcl::PointCloud<pcl::PointXYZI>());
+    pcl::PointCloudXYZRGBtoXYZI(*cloud, *intensity_cloud);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr intensity_kpts(new pcl::PointCloud<pcl::PointXYZI>());
+    pcl::PointCloudXYZRGBtoXYZI(*kpts, *intensity_kpts);
+
+    //pcl::console::print_value( "test\n");
+    // Compute the intensity gradients.
+    pcl::PointCloud<pcl::IntensityGradient>::Ptr gradients(new pcl::PointCloud<pcl::IntensityGradient>);
+    pcl::IntensityGradientEstimation< pcl::PointXYZI, pcl::Normal, pcl::IntensityGradient,
+            pcl::common::IntensityFieldAccessor<pcl::PointXYZI> > ge;
+
+    ge.setInputCloud( intensity_kpts );
+    //ge.setInputCloud( intensity_kpts );
+    ge.setSearchSurface( intensity_cloud );
+    //ge.setSearchSurface( intensity_kpts );
+    ge.setInputNormals(normals);
+    ge.setRadiusSearch(GradientEstimationsetRadiusSearch);//1000.00001//0.05
+    ge.compute(*gradients);
+    pcl::console::print_value( "gradients = %d, keypoints = %d\n", (int)gradients->size(), (int)intensity_kpts->size() );
+
+    //pcl::console::print_value( "test\n");
+    pcl::RIFTEstimation<pcl::PointXYZI, pcl::IntensityGradient, RIFT32 > rift_extraction;
+    rift_extraction.setInputCloud(intensity_kpts);
+//  rift_extraction.setSearchSurface( intensity_cloud );
+    rift_extraction.setInputGradient(gradients);
+    rift_extraction.setRadiusSearch(RadiusSearch);//100.05 //0.5
+    rift_extraction.setNrDistanceBins(NrDistanceBins);//4
+    rift_extraction.setNrGradientBins(NrGradientBins);//8
+
+
+    pcl::PointCloud<RIFT32 >::Ptr descrs( new pcl::PointCloud<RIFT32 >() );
+    rift_extraction.compute( *descrs );
+    double t = tt.toc();
+    pcl::console::print_value( "Rotation-Invariant Feature Transform takes %.3f and %d features. \n", t,  descrs->size());
+
+    return descrs;
+
+}
+
+
+void downsample (pcl::PointCloud<pcl::PointXYZRGB>::Ptr &points, float leaf_size, pcl::PointCloud<pcl::PointXYZRGB>::Ptr &downsampled_out) {
+    pcl::VoxelGrid<pcl::PointXYZRGB> vox_grid;
+    vox_grid.setLeafSize (leaf_size, leaf_size, leaf_size);
+    vox_grid.setInputCloud (points);
+    vox_grid.filter (*downsampled_out);
+
+    std::cout << "Num of points in :" << points->size() << std::endl;
+    std::cout << "Num of points out :" << downsampled_out->size() << std::endl;
+}
+
+
+void find_feature_correspondences_shapeContext (pcl::PointCloud<pcl::ShapeContext1980>::Ptr &source_descriptors,
+                                                pcl::PointCloud<pcl::ShapeContext1980>::Ptr &target_descriptors,
+                                                std::vector<int> &correspondences_out, std::vector<float> &correspondence_scores_out) {
+    // Resize the output vector
+    std::cout << "shapeContext source_descriptors size:" << source_descriptors->size () << std::endl;
+    correspondences_out.resize (source_descriptors->size ());
+    correspondence_scores_out.resize (source_descriptors->size ());
+    std::cout << "shapeContext correspondences_out size:" << correspondences_out.size () << std::endl;
+    std::cout << "shapeContext correspondence_scores_out size:" << correspondence_scores_out.size () << std::endl;
+
+    // Use a KdTree to search for the nearest matches in feature space
+    //pcl::PointCloud<pcl::ShapeContext1980>::Ptr descrs_ShapeContext1980_1( new pcl::PointCloud<pcl::ShapeContext1980>() );
+    //pcl::search::KdTree<pcl::PFHSignature125> descriptor_kdtree;
+    pcl::search::KdTree<pcl::ShapeContext1980> descriptor_kdtree;
+    descriptor_kdtree.setInputCloud (target_descriptors);
+
+    // Find the index of the best match for each keypoint, and store it in "correspondences_out"
+    const int k = 1;
+    std::vector<int> k_indices (k);
+    std::vector<float> k_squared_distances (k);
+
+    for (size_t i = 0; i < source_descriptors->size (); ++i)
+    {
+        descriptor_kdtree.nearestKSearch (*source_descriptors, i, k, k_indices, k_squared_distances);
+        correspondences_out[i] = k_indices[0];
+        correspondence_scores_out[i] = k_squared_distances[0];
+    }
+}
+
+
+void rejectBadCorrespondences(const pcl::CorrespondencesPtr &all_correspondences,
+                              const pcl::PointCloud<pcl::PointWithScale>::Ptr &keypoints_src,
+                              const pcl::PointCloud<pcl::PointWithScale>::Ptr &keypoints_tgt,
+                              pcl::Correspondences &remaining_correspondences)
+{
+    // copy only XYZRGB data of keypoints for use in estimating features
+    pcl::PointCloud <pcl::PointXYZRGB>::Ptr keypoints_src_xyzrgb(new pcl::PointCloud <pcl::PointXYZRGB>);
+    pcl::PointCloud <pcl::PointXYZRGB>::Ptr keypoints_tgt_xyzrgb(new pcl::PointCloud <pcl::PointXYZRGB>);
+    pcl::copyPointCloud(*keypoints_src, *keypoints_src_xyzrgb);
+    pcl::copyPointCloud(*keypoints_tgt, *keypoints_tgt_xyzrgb);
+
+
+    // RandomSampleConsensus bad correspondence rejector
+    pcl::registration::CorrespondenceRejectorSampleConsensus <pcl::PointXYZRGB> correspondence_rejector;
+    correspondence_rejector.setInputSource (keypoints_src_xyzrgb);
+    correspondence_rejector.setInputTarget (keypoints_tgt_xyzrgb);
+    correspondence_rejector.setInlierThreshold(RANSAC_Inlier_Threshold);
+    correspondence_rejector.setMaximumIterations(RANSAC_Iterations);
+    correspondence_rejector.setRefineModel(true);//false
+    correspondence_rejector.setInputCorrespondences(all_correspondences);
+    correspondence_rejector.getCorrespondences(remaining_correspondences);
+}
+
+void findCorrespondences_FPFHSignature33 (pcl::PointCloud<pcl::FPFHSignature33>::Ptr &fpfhs_src,
+                                          pcl::PointCloud<pcl::FPFHSignature33>::Ptr &fpfhs_tgt,
+                                          pcl::Correspondences &all_correspondences) {
+    pcl::registration::CorrespondenceEstimation<pcl::FPFHSignature33, pcl::FPFHSignature33> est;
+    est.setInputSource(fpfhs_src);
+    est.setInputTarget(fpfhs_tgt);
+    est.determineReciprocalCorrespondences(all_correspondences);
+}
+
+void findCorrespondences_PFH_newshort (pcl::PointCloud<pcl::PFHSignature125>::Ptr &fpfhs_src,
+                                       pcl::PointCloud<pcl::PFHSignature125>::Ptr &fpfhs_tgt,
+                                       pcl::Correspondences &all_correspondences) {
+    pcl::registration::CorrespondenceEstimation<pcl::PFHSignature125, pcl::PFHSignature125> est;
+    est.setInputSource(fpfhs_src);
+    est.setInputTarget(fpfhs_tgt);
+    est.determineReciprocalCorrespondences(all_correspondences);
+}
+void findCorrespondences_PFHRGB(const pcl::PointCloud<pcl::PFHRGBSignature250>::Ptr &fpfhs_src,
+                                const pcl::PointCloud<pcl::PFHRGBSignature250>::Ptr &fpfhs_tgt,
+                                pcl::Correspondences &all_correspondences) {
+    pcl::registration::CorrespondenceEstimation<pcl::PFHRGBSignature250, pcl::PFHRGBSignature250> est;
+    est.setInputSource(fpfhs_src);
+    est.setInputTarget(fpfhs_tgt);
+    est.determineReciprocalCorrespondences(all_correspondences);
+}
+void findCorrespondences_SHOT352(const pcl::PointCloud<pcl::SHOT352>::Ptr &fpfhs_src,
+                                 const pcl::PointCloud<pcl::SHOT352>::Ptr &fpfhs_tgt,
+                                 pcl::Correspondences &all_correspondences) {
+    pcl::registration::CorrespondenceEstimation<pcl::SHOT352, pcl::SHOT352> est;
+    est.setInputSource(fpfhs_src);
+    est.setInputTarget(fpfhs_tgt);
+    est.determineReciprocalCorrespondences(all_correspondences);
+}
+void findCorrespondences_SHOT1344(const pcl::PointCloud<pcl::SHOT1344>::Ptr &fpfhs_src,
+                                  const pcl::PointCloud<pcl::SHOT1344>::Ptr &fpfhs_tgt,
+                                  pcl::Correspondences &all_correspondences) {
+    pcl::registration::CorrespondenceEstimation<pcl::SHOT1344, pcl::SHOT1344> est;
+    est.setInputSource(fpfhs_src);
+    est.setInputTarget(fpfhs_tgt);
+    est.determineReciprocalCorrespondences(all_correspondences);
+}
+
+
+/*  //didn*t work
+void findCorrespondences_RIFT32(const pcl::PointCloud<pcl::Histogram<32>>::Ptr &fpfhs_src,
+                                const pcl::PointCloud<pcl::Histogram<32>>::Ptr &fpfhs_tgt,
+                                  pcl::Correspondences &all_correspondences) {
+    pcl::registration::CorrespondenceEstimation<pcl::Histogram<32>, pcl::Histogram<32>> est;
+    est.setInputSource(fpfhs_src);
+    est.setInputTarget(fpfhs_tgt);
+    est.determineReciprocalCorrespondences(all_correspondences);
+}
 */
- /*
-#define min_scale 0.2
-#define nr_octaves 4
-#define nr_scales_per_octave 5
-#define min_contrast 0.25
-*/
+
+void findCorrespondences_ShapeContext1980(const pcl::PointCloud<pcl::ShapeContext1980>::Ptr &fpfhs_src,
+                                          const pcl::PointCloud<pcl::ShapeContext1980>::Ptr &fpfhs_tgt,
+                                          pcl::Correspondences &all_correspondences) {
+    pcl::registration::CorrespondenceEstimation<pcl::ShapeContext1980, pcl::ShapeContext1980> est;
+    est.setInputSource(fpfhs_src);
+    est.setInputTarget(fpfhs_tgt);
+    est.determineReciprocalCorrespondences(all_correspondences);
+}
+
+
+void findCorrespondences_PrincipalRadiiRSD(const pcl::PointCloud<pcl::PrincipalRadiiRSD>::Ptr &fpfhs_src,
+                                           const pcl::PointCloud<pcl::PrincipalRadiiRSD>::Ptr &fpfhs_tgt,
+                                           pcl::Correspondences &all_correspondences) {
+    pcl::registration::CorrespondenceEstimation<pcl::PrincipalRadiiRSD, pcl::PrincipalRadiiRSD> est;
+    est.setInputSource(fpfhs_src);
+    est.setInputTarget(fpfhs_tgt);
+    est.determineReciprocalCorrespondences(all_correspondences);
+}
+
+
+void findCorrespondences_UniqueShapeContext1960(const pcl::PointCloud<pcl::UniqueShapeContext1960>::Ptr &fpfhs_src,
+                                                const pcl::PointCloud<pcl::UniqueShapeContext1960>::Ptr &fpfhs_tgt,
+                                                pcl::Correspondences &all_correspondences) {
+
+    std::cout << "inside findCorrespondences_UniqueShapeContext1960" << std::endl;
+    pcl::registration::CorrespondenceEstimation<pcl::UniqueShapeContext1960, pcl::UniqueShapeContext1960> est;
+    std::cout << "def findCorrespondences_UniqueShapeContext1960" << std::endl;
+    est.setInputSource(fpfhs_src);
+    est.setInputTarget(fpfhs_tgt);
+    std::cout << "set in and target findCorrespondences_UniqueShapeContext1960" << std::endl;
+    est.determineReciprocalCorrespondences(all_correspondences);
+}
+
+
+void find_feature_correspondences_PFH (pcl::PointCloud<pcl::PFHSignature125>::Ptr &source_descriptors,
+                                       pcl::PointCloud<pcl::PFHSignature125>::Ptr &target_descriptors,
+                                       std::vector<int> &correspondences_out, std::vector<float> &correspondence_scores_out) {
+    // Resize the output vector
+    std::cout << "PFH source_descriptors size:" << source_descriptors->size () << std::endl;
+    correspondences_out.resize (source_descriptors->size ());
+    correspondence_scores_out.resize (source_descriptors->size ());
+    std::cout << "shapeContext correspondences_out size:" << correspondences_out.size () << std::endl;
+    std::cout << "shapeContext correspondence_scores_out size:" << correspondence_scores_out.size () << std::endl;
+
+
+    // Use a KdTree to search for the nearest matches in feature space
+    pcl::search::KdTree<pcl::PFHSignature125> descriptor_kdtree;
+    descriptor_kdtree.setInputCloud (target_descriptors);
+
+    // Find the index of the best match for each keypoint, and store it in "correspondences_out"
+    const int k = 1;
+    std::vector<int> k_indices (k);
+    std::vector<float> k_squared_distances (k);
+
+    for (size_t i = 0; i < source_descriptors->size (); ++i)
+    {
+        descriptor_kdtree.nearestKSearch (*source_descriptors, i, k, k_indices, k_squared_distances);
+        correspondences_out[i] = k_indices[0];
+        correspondence_scores_out[i] = k_squared_distances[0];
+    }
+}
+
+
+pcl::PointCloud<pcl::PointWithScale>::Ptr iss3d_PointWithScale( pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr cloud) {
+    pcl::ISSKeypoint3D<pcl::PointXYZRGB, pcl::PointWithScale> iss_detector;
+    pcl::search::KdTree<pcl::PointWithScale>::Ptr tree( new pcl::search::KdTree<pcl::PointWithScale>());
+
+    double cloud_resolution = compute_cloud_resolution( cloud );
+    iss_detector.setSalientRadius (6 * cloud_resolution);
+    iss_detector.setNonMaxRadius (4 * cloud_resolution);
+
+    iss_detector.setThreshold21 (0.99);//0.975
+    iss_detector.setThreshold32 (0.99);
+    iss_detector.setMinNeighbors (5);
+    iss_detector.setNumberOfThreads (1);
+
+    iss_detector.setInputCloud (cloud);//was without star
+    pcl::PointCloud<pcl::PointWithScale>::Ptr kpts( new pcl::PointCloud<pcl::PointWithScale>() );
+    iss_detector.compute(*kpts);
+    return kpts;
+}
+
+//------------------------------------------------------------------------------------------------------------------------------
+
 
 
 inline bool exists_file (const std::string& name) {
@@ -207,7 +993,8 @@ std::tuple<uint8_t, uint8_t, uint8_t> stacked_jet(double z, double threshold){
 
 
 void compute_normals(pcl::PointCloud <pcl::PointXYZRGB>::Ptr &points,
-     pcl::PointCloud <pcl::Normal>::Ptr &normals_out) {
+     pcl::PointCloud <pcl::Normal>::Ptr &normals_out,
+     double normal_radius) {
 
     pcl::NormalEstimation <pcl::PointXYZRGB, pcl::Normal> norm_est;
     // Use a FLANN-based KdTree to perform neighbourhood searches
@@ -249,11 +1036,12 @@ void add_noise_normal_distributedvoid(pcl::PointCloud<pcl::PointXYZRGB>::Ptr clo
 }
 
 
-
+/*
 void compute_PFHRGB_features(pcl::PointCloud <pcl::PointXYZRGB>::Ptr &cloud,
     pcl::PointCloud <pcl::Normal>::Ptr &normals,
     pcl::PointCloud <pcl::PointWithScale>::Ptr &keypoints,
-    pcl::PointCloud <pcl::PFHRGBSignature250>::Ptr &descriptors_out) {
+    pcl::PointCloud <pcl::PFHRGBSignature250>::Ptr &descriptors_out,
+    double feature_radius_PFHRGB) {
 
 
     // copy only XYZ data of keypoints for use in estimating features
@@ -277,17 +1065,19 @@ void compute_PFHRGB_features(pcl::PointCloud <pcl::PointXYZRGB>::Ptr &cloud,
 
     // Use all neighbors in a sphere of radius radius
     // IMPORTANT: the radius used here has to be larger than the radius used to estimate the surface normals!!!
-    pfhrgbEstimation.setRadiusSearch(feature_radius);
+    pfhrgbEstimation.setRadiusSearch(feature_radius_PFHRGB);
 
     // Compute the features
     pfhrgbEstimation.compute(*descriptors_out);
 
 }
+*/
 
 void compute_PFH_features(pcl::PointCloud <pcl::PointXYZRGB>::Ptr &cloud,
                              pcl::PointCloud <pcl::Normal>::Ptr &normals,
                              pcl::PointCloud <pcl::PointWithScale>::Ptr &keypoints,
-                             pcl::PointCloud <pcl::PFHSignature125>::Ptr &descriptors_out) {
+                             pcl::PointCloud <pcl::PFHSignature125>::Ptr &descriptors_out,
+                             double feature_radius_PFH) {
 
 
     // copy only XYZ data of keypoints for use in estimating features
@@ -311,13 +1101,15 @@ void compute_PFH_features(pcl::PointCloud <pcl::PointXYZRGB>::Ptr &cloud,
 
     // Use all neighbors in a sphere of radius radius
     // IMPORTANT: the radius used here has to be larger than the radius used to estimate the surface normals!!!
-    pfhEstimation.setRadiusSearch(feature_radius);
+    pfhEstimation.setRadiusSearch(feature_radius_PFH);
 
     // Compute the features
     pfhEstimation.compute(*descriptors_out);
 
 }
 
+
+/*
 void findCorrespondences_PFHRGB(const pcl::PointCloud<pcl::PFHRGBSignature250>::Ptr &fpfhs_src,
     const pcl::PointCloud<pcl::PFHRGBSignature250>::Ptr &fpfhs_tgt,
     pcl::Correspondences &all_correspondences) {
@@ -327,6 +1119,7 @@ void findCorrespondences_PFHRGB(const pcl::PointCloud<pcl::PFHRGBSignature250>::
     est.setInputTarget(fpfhs_tgt);
     est.determineReciprocalCorrespondences(all_correspondences);
 }
+ */
 
 void findCorrespondences_PFH (pcl::PointCloud<pcl::PFHSignature125>::Ptr &fpfhs_src,
                                        pcl::PointCloud<pcl::PFHSignature125>::Ptr &fpfhs_tgt,
@@ -365,7 +1158,7 @@ void findCorrespondences_PFH (pcl::PointCloud<pcl::PFHSignature125>::Ptr &fpfhs_
      */
 }
 
-
+/*
 void rejectBadCorrespondences_onZDist(const pcl::CorrespondencesPtr &all_correspondences,
                               const pcl::PointCloud<pcl::PointWithScale>::Ptr &keypoints_src,
                               const pcl::PointCloud<pcl::PointWithScale>::Ptr &keypoints_tgt,
@@ -397,7 +1190,7 @@ void rejectBadCorrespondences(const pcl::CorrespondencesPtr &all_correspondences
     correspondence_rejector.setInputCorrespondences(all_correspondences);
     correspondence_rejector.getCorrespondences(remaining_correspondences);
 }
-
+*/
 
 void compute_keypoints(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &src,
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr &tgt,
@@ -406,7 +1199,8 @@ void compute_keypoints(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &src,
     std::string keypoints_meth,
     double min_scale_SIFT, int nr_octaves_SIFT, int nr_scales_per_octave_SIFT, double min_contrast_SIFT,
     float set_radius_harris, float set_radius_search_harris, std::string HarrisRosponseMethod,
-    int SalientRad_muliplier_ISS, int NonMaxMultiplier_ISS, double Threshold21_ISS, double Threshold32_ISS, int setMinNeighbors_ISS, int setNumberOfThreads_ISS) {
+    int SalientRad_muliplier_ISS, int NonMaxMultiplier_ISS, double Threshold21_ISS, double Threshold32_ISS, int setMinNeighbors_ISS, int setNumberOfThreads_ISS,
+    double normal_radius) {
 
 
     // ESTIMATING KEY POINTS
@@ -418,8 +1212,9 @@ void compute_keypoints(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &src,
     pcl::PointCloud <pcl::Normal>::Ptr src_normals(new pcl::PointCloud<pcl::Normal>);
     pcl::PointCloud <pcl::Normal>::Ptr tgt_normals(new pcl::PointCloud<pcl::Normal>);
 
-    compute_normals(src, src_normals);
-    compute_normals(tgt, tgt_normals);
+
+    compute_normals(src, src_normals, normal_radius);
+    compute_normals(tgt, tgt_normals, normal_radius);
 
     if(keypoints_meth=="ISS"){
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr keypoints_iss_src( new pcl::PointCloud<pcl::PointXYZRGB>() );
@@ -437,10 +1232,6 @@ void compute_keypoints(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &src,
         pcl::PointCloud<pcl::PointXYZI>::Ptr keypoints_harris_tgt( new pcl::PointCloud<pcl::PointXYZI>() );
         //float set_radius =1.7,set_radius_search=1.7;
         cout << "chosen Method is Harris3D" << endl;
-        //keypoints_harris_scr= harris3d( src, pcl::HarrisKeypoint3D<pcl::PointXYZRGB, pcl::PointXYZI>::LOWE ,set_radius_harris, set_radius_search_harris);
-        //keypoints_harris_tgt= harris3d( tgt, pcl::HarrisKeypoint3D<pcl::PointXYZRGB, pcl::PointXYZI>::LOWE ,set_radius_harris, set_radius_search_harris);
-        //cout << "No of Harris3D points in the src are " << keypoints_harris_scr->points.size() << endl;
-        //cout << "No of Harris3D points in the tgt are " << keypoints_harris_tgt->points.size() << endl;
 
         cout << "HarrisRosponseMethod: " << HarrisRosponseMethod << endl;
         if (HarrisRosponseMethod=="Harris") {
@@ -477,79 +1268,6 @@ void compute_keypoints(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &src,
 
         pcl::copyPointCloud(*keypoints_harris_scr, *keypoints_src);
         pcl::copyPointCloud(*keypoints_harris_tgt, *keypoints_tgt);
-    }else if(keypoints_meth=="NARF"){
-
-        //not tested
-        pcl::PointCloud<pcl::PointXYZI>::Ptr keypoints_narf_scr( new pcl::PointCloud<pcl::PointXYZI>() );
-        pcl::PointCloud<pcl::PointXYZI>::Ptr keypoints_narf_tgt( new pcl::PointCloud<pcl::PointXYZI>() );
-        cout << "chosen Method is Narf" << endl;
-
-        cout << "No of NARF points in the src are " << keypoints_narf_scr->points.size() << endl;
-        cout << "No of NARF points in the tgt are " << keypoints_narf_tgt->points.size() << endl;
-
-        pcl::copyPointCloud(*keypoints_narf_scr, *keypoints_src);
-        pcl::copyPointCloud(*keypoints_narf_tgt, *keypoints_tgt);
-    }else if(keypoints_meth=="AGAS"){
-
-    }else if(keypoints_meth=="HARRIS6D"){
-        /*
-        harris6D_detector_src* detector = new HarrisKeypoint6D(HarrisKeypoint::HARRIS);
-        harris6D_detector_tgt* detector = new HarrisKeypoint6D(HarrisKeypoint::HARRIS);
-        //pcl::HarrisKeypoint6D<pcl::PointXYZRGB, pcl::PointXYZI>::Ptr harris6D_detector_src(new pcl::HarrisKeypoint6D<pcl::PointXYZI);
-        //pcl::HarrisKeypoint6D<pcl::PointXYZRGB, pcl::PointXYZI>::Ptr harris6D_detector_tgt(new pcl::HarrisKeypoint6D<pcl::PointXYZRGB);
-
-        harris6D_detector_src->setNonMaxSupression( true );
-        harris6D_detector_src->setRadius( set_radius );//orig 0.03f   worked with 0.45 for CURVATURE
-        harris6D_detector_src->setRadiusSearch( set_radius_search );//orig 0.03f   worked with 0.45 for CURVATURE
-
-        harris6D_detector_tgt->setNonMaxSupression( true );
-        harris6D_detector_tgt->setRadius( set_radius );//orig 0.03f   worked with 0.45 for CURVATURE
-        harris6D_detector_tgt->setRadiusSearch( set_radius_search );//orig 0.03f   worked with 0.45 for CURVATURE
-
-        pcl::PointCloud<pcl::PointXYZI>::Ptr keypoints_harris6d_scr( new pcl::PointCloud<pcl::PointXYZI>() );
-        pcl::PointCloud<pcl::PointXYZI>::Ptr keypoints_harris6d_tgt( new pcl::PointCloud<pcl::PointXYZI>() );
-
-        harris6D_detector_src->setInputCloud( src );
-        harris6D_detector_tgt->setInputCloud( tgt );
-        harris6D_detector_src->compute( *keypoints_harris6d_scr );
-        harris6D_detector_tgt->compute( *keypoints_harris6d_tgt );
-    */
-
-    }else if(keypoints_meth=="TRAJCOVIC") {
-
-    }else if(keypoints_meth=="SUSAN"){
-
-        pcl::SUSANKeypoint<pcl::PointXYZRGB, pcl::PointXYZRGB>* susan3D_src = new  pcl::SUSANKeypoint<pcl::PointXYZRGB, pcl::PointXYZRGB>;
-        pcl::SUSANKeypoint<pcl::PointXYZRGB, pcl::PointXYZRGB>* susan3D_tgt = new  pcl::SUSANKeypoint<pcl::PointXYZRGB, pcl::PointXYZRGB>;
-        susan3D_src->setInputCloud(src);
-        susan3D_tgt->setInputCloud(tgt);
-        susan3D_src->setNonMaxSupression(true); //true
-        susan3D_tgt->setNonMaxSupression(true);  //true
-        //susan3D_src->setNormals(src_normals);   //new
-        //
-        float set_radius_susan =1.7,set_radius_search_susan=1.7;
-        pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree_src (new pcl::search::KdTree<pcl::PointXYZRGB> ());
-        pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree_tgt (new pcl::search::KdTree<pcl::PointXYZRGB> ());
-        susan3D_src->setSearchMethod(tree_src);
-        susan3D_tgt->setSearchMethod(tree_tgt);
-        susan3D_src->setRadius(set_radius_susan);
-        susan3D_tgt->setRadius(set_radius_susan);
-        susan3D_src->setRadiusSearch(5.);
-        susan3D_tgt->setRadiusSearch(5.);
-
-        susan3D_src->setDistanceThreshold (15.0);   //new
-        susan3D_tgt->setDistanceThreshold (15.0);   //new
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr keypoints_susan_scr (new pcl::PointCloud<pcl::PointXYZRGB> ());
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr keypoints_susan_tgt (new pcl::PointCloud<pcl::PointXYZRGB> ());
-        susan3D_src->compute(*keypoints_susan_scr);
-        susan3D_tgt->compute(*keypoints_susan_tgt);
-
-
-        cout << "No of SUSAN points in the src are " << keypoints_susan_scr->points.size() << endl;
-        cout << "No of SUSAN points in the tgt are " << keypoints_susan_tgt->points.size() << endl;
-
-        pcl::copyPointCloud(*keypoints_susan_scr, *keypoints_src);
-        pcl::copyPointCloud(*keypoints_susan_tgt, *keypoints_tgt);
     }else{
         cout << "chosen Method is SWIFT" << endl;
         detect_keypoints_SIFT(src, keypoints_src, min_scale_SIFT, nr_octaves_SIFT, nr_scales_per_octave_SIFT, min_contrast_SIFT);
@@ -559,64 +1277,9 @@ void compute_keypoints(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &src,
         cout << "No of SIFT points in the tgt are " << keypoints_tgt->points.size() << endl;
     }
 
-
-
-
-
-/*
-    // PFHRGB Estimation
-    pcl::PointCloud <pcl::PFHRGBSignature250>::Ptr fpfhs_src_rgb(new pcl::PointCloud<pcl::PFHRGBSignature250>);
-    pcl::PointCloud <pcl::PFHRGBSignature250>::Ptr fpfhs_tgt_rgb(new pcl::PointCloud<pcl::PFHRGBSignature250>);
-
-    compute_PFHRGB_features(src, src_normals, keypoints_src, fpfhs_src_rgb);
-    compute_PFHRGB_features(tgt, tgt_normals, keypoints_tgt, fpfhs_tgt_rgb);
-    cout << "End of compute_FPFH_RGB_features! " << endl;
-*/
     // Copying the pointwithscale to pointxyz so as visualize the cloud
     pcl::copyPointCloud(*keypoints_src, *keypoints_src_visualize_temp);
     pcl::copyPointCloud(*keypoints_tgt, *keypoints_tgt_visualize_temp);
-
-    //cout << " points in the keypoints_src_visualize_temp are " << keypoints_src_visualize_temp->points.size() << endl;
-    //cout << " points in the keypoints_tgt_visualize_temp are " << keypoints_tgt_visualize_temp->points.size() << endl;
-
-/*
-    // Find correspondences between keypoints in FPFH space
-    pcl::CorrespondencesPtr all_correspondences_RGB(new pcl::Correspondences);
-    findCorrespondences_PFHRGB(fpfhs_src_rgb, fpfhs_tgt_rgb, *all_correspondences_RGB);
-    cout << "All correspondences size: " << all_correspondences_RGB->size() << endl;
-*/
-
-    //todo remove later -> uncomented stuff is without RGB matching
-    /*
-    // PFHRGB Estimation
-    pcl::CorrespondencesPtr all_correspondences(new pcl::Correspondences);
-    pcl::PointCloud <pcl::PFHSignature125>::Ptr fpfhs_src (new pcl::PointCloud<pcl::PFHSignature125>);
-    pcl::PointCloud <pcl::PFHSignature125>::Ptr fpfhs_tgt(new pcl::PointCloud<pcl::PFHSignature125>);
-
-    compute_PFH_features(src, src_normals, keypoints_src, fpfhs_src);
-    compute_PFH_features(tgt, tgt_normals, keypoints_tgt, fpfhs_tgt);
-    cout << "End of compute_FPFH_features! " << endl;
-    findCorrespondences_PFH(fpfhs_src, fpfhs_tgt, *all_correspondences);
-
-
-    cout << "End of findCorrespondences! " << endl;
-    cout << "All correspondences size: " << all_correspondences->size() << endl;
-
-    // Reject correspondences based on their XYZ distance
-    /*rejectBadCorrespondences(all_correspondences, keypoints_src_visualize_temp, keypoints_tgt_visualize_temp, good_correspondences);*/
-/*
-    rejectBadCorrespondences(all_correspondences_RGB, keypoints_src, keypoints_tgt, good_correspondences);
-    //rejectBadCorrespondences(all_correspondences, keypoints_src, keypoints_tgt, good_correspondences);
-
-    cout << "End of rejectBadCorrespondences! " << endl;
-    cout << "Good correspondences size: " << good_correspondences.size() << endl;
-
-
-
-    pcl::registration::TransformationEstimationSVD<pcl::PointXYZ, pcl::PointXYZ> trans_est;
-    trans_est.estimateRigidTransformation(*keypoints_src_visualize_temp, *keypoints_tgt_visualize_temp, good_correspondences, transform);
-
-*/
 }
 
 void keypoint_evaluation(Mapsample& submap_overlap, const pcl::PointCloud<pcl::PointXYZ>::Ptr keypoints_1, const pcl::PointCloud<pcl::PointXYZ>::Ptr keypoints_2){
@@ -684,7 +1347,7 @@ void keypoint_evaluation(Mapsample& submap_overlap, const pcl::PointCloud<pcl::P
 
 
 int main(int argc, char** argv) {
-    int roation_flag=0, z_rejection_flag=0;
+    int roation_flag=0, z_rejection_flag=0, cloud_filter_flag=0;
     int red=0, green=0, blue=0, jet_flag=0, grid_flag=0;
     //parse input para
     double validation_radius_in=0.0, validation_radius_out=0.0;
@@ -701,6 +1364,7 @@ int main(int argc, char** argv) {
     int NonMaxMultiplier_ISS=4;
     double Threshold21_ISS=0.99, Threshold32_ISS=0.99;
     int setMinNeighbors_ISS=5, setNumberOfThreads_ISS=1;
+    float voxel_grid_leaf_size = 1.8;
 
     cxxopts::Options options("test", "A brief description");
     options.add_options()
@@ -723,6 +1387,9 @@ int main(int argc, char** argv) {
             ("b,betha", "roation around y axis (insert in radiant)", cxxopts::value<double>(rot_betha)->default_value("0.0"))
             ("c,gamma", "roation around x axis (insert in radiant)", cxxopts::value<double>(rot_gamma)->default_value("0.0"))
 
+            ("feature_method", "method used to build the descriptor", cxxopts::value<std::string>())
+            ("voxel_grid_leaf_size", "size of the voxel_grid leave size for filtering the cloud", cxxopts::value<float>(voxel_grid_leaf_size)->default_value("1.8"))
+            ("cloud_filter_flag", "if set to one the cloud is filtered via an voxel-grid before any further processing is done (less points->faster keypoint detection)", cxxopts::value<int>(cloud_filter_flag)->default_value("0"))
 
             ("m,method", "method to search keypoints (ISS, Harris, otherwise SWIFT)", cxxopts::value<std::string>())
             ("min_scale_SIFT", "input parameter min_scale_SIFT for SIFT", cxxopts::value<double>(min_scale_SIFT)->default_value("0.2"))
@@ -770,6 +1437,14 @@ int main(int argc, char** argv) {
         roation_flag=1;
     }
     std::cout << "grid_flag: " << grid_flag << std::endl;
+
+    std::string feature_method;
+    if (result.count("feature_method"))    {
+        std::cout << "feature method = " << result["feature_method"].as<std::string>() << std::endl;
+        feature_method=result["feature_method"].as<std::string>();
+    }else{
+        feature_method="PFH";
+    }
     std::string keypoint_method;
     if (result.count("method"))    {
         std::cout << "keypoint method = " << result["method"].as<std::string>() << std::endl;
@@ -836,18 +1511,10 @@ int main(int argc, char** argv) {
     }
 
     // Time start (main function)
-    time_t start_computation, end_computation, start_total, end_total;
-    time(&start_total);
-    time(&start_computation);
 
-    // READ SOURCE AND TARGET FILES
-    //string src_file = "Plate_no_change_500000_scaled.pcd";
-    //string tgt_file = "Plate_change_500000.pcd";
-    //string src_file = "../data1.pcd";
-    //string tgt_file = "../data2.pcd";
-
-
-    //string src_file = "../submap_part10_4.pcd";
+    //time_t start_computation, end_computation, start_total, end_total;
+    //time(&start_total);
+    //time(&start_computation);
 
     //string src_file = "../../data/cloud_nocoor.pcd";        //<--
     //string src_file = "../cloud_overlap_1.pcd";
@@ -859,24 +1526,50 @@ int main(int argc, char** argv) {
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt_original(new pcl::PointCloud<pcl::PointXYZRGB>);
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt_transformed(new pcl::PointCloud<pcl::PointXYZRGB>);
 
-    //if (pcl::io::loadPCDFile<pcl::PointXYZRGB>(src_file, *src_original) == -1 || pcl::io::loadPCDFile<pcl::PointXYZRGB>(tgt_file, *tgt_original) == -1)
-    if (pcl::io::loadPCDFile<pcl::PointXYZRGB>(src_file, *src_original) == -1 || pcl::io::loadPCDFile<pcl::PointXYZRGB>(tgt_file, *tgt_original) == -1  || pcl::io::loadPCDFile<pcl::PointXYZRGB>(tgt_file, *tgt_transformed) == -1)
-    {
+    if (pcl::io::loadPCDFile<pcl::PointXYZRGB>(src_file, *src_original) == -1 || pcl::io::loadPCDFile<pcl::PointXYZRGB>(tgt_file, *tgt_original) == -1  || pcl::io::loadPCDFile<pcl::PointXYZRGB>(tgt_file, *tgt_transformed) == -1){
         PCL_ERROR("Couldn't read src or tgt file");
         return -1;
     }
-    //make a copy of the original target data
-    //pcl::copyPointCloud(*tgt_original, *tgt_transformed);
     cout << "Src points: " << src_original->points.size() << endl;
     cout << "Tgt points: " << tgt_transformed->points.size() << endl;
 
-    add_noise_normal_distributedvoid(tgt_transformed, noise_offset, noise_var, x_o, y_o, z_o, red, green, blue);
+
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr src_downsampled_1(new pcl::PointCloud<pcl::PointXYZRGB>);
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt_downsampled_2(new pcl::PointCloud<pcl::PointXYZRGB>);
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt_downsampled_2_transformed(new pcl::PointCloud<pcl::PointXYZRGB>);
+    if(cloud_filter_flag==1){
+        // Create the filtering object
+
+        pcl::VoxelGrid<pcl::PointXYZRGB> sor;
+        sor.setInputCloud(src_original);
+        sor.setLeafSize(voxel_grid_leaf_size, voxel_grid_leaf_size, voxel_grid_leaf_size);
+        sor.filter(*src_downsampled_1);
+
+        sor.setInputCloud(tgt_transformed);
+        sor.setLeafSize(voxel_grid_leaf_size, voxel_grid_leaf_size, voxel_grid_leaf_size);
+        sor.filter(*tgt_downsampled_2);
+
+        sor.setInputCloud(tgt_transformed);
+        sor.setLeafSize(voxel_grid_leaf_size, voxel_grid_leaf_size, voxel_grid_leaf_size);
+        sor.filter(*tgt_downsampled_2_transformed);
+
+        cout << "src_downsampled_1 points: " << src_downsampled_1->size() << endl;
+        cout << "tgt_downsampled_2 points: " << tgt_downsampled_2->size() << endl;
+        cout << "tgt_downsampled_2_transformed points: " << tgt_downsampled_2_transformed->size() << endl;
+    }else{
+        copyPointCloud(*src_original, *src_downsampled_1);
+        copyPointCloud(*tgt_original, *tgt_downsampled_2);
+        copyPointCloud(*tgt_transformed, *tgt_downsampled_2_transformed);
+
+    }
+
+    add_noise_normal_distributedvoid(tgt_downsampled_2_transformed, noise_offset, noise_var, x_o, y_o, z_o, red, green, blue);
 
     if(jet_flag==1  || jet_flag==2){
         double total_min_z, total_max_z;
         pcl::PointXYZRGB minPt1, maxPt1,minPt2, maxPt2;;
-        pcl::getMinMax3D (*tgt_transformed, minPt1, maxPt1);
-        pcl::getMinMax3D (*src_original, minPt2, maxPt2);
+        pcl::getMinMax3D (*tgt_downsampled_2_transformed, minPt1, maxPt1);
+        pcl::getMinMax3D (*src_downsampled_1, minPt2, maxPt2);
 
         total_min_z = minPt1.z<minPt2.z ? minPt1.z : minPt2.z;
         total_max_z = maxPt1.z>maxPt2.z ? maxPt1.z : maxPt2.z;
@@ -888,113 +1581,372 @@ int main(int argc, char** argv) {
         if(jet_flag==2){
             //regular stacked jet section (was chosen this style to not loop over the if)
             //double jet_stacking_threshold=30;
-            for (std::size_t i = 0; i < src_original->points.size (); ++i){
+            for (std::size_t i = 0; i < src_downsampled_1->points.size (); ++i){
                 pcl::PointXYZRGB pointrgb;
                 std::tuple<uint8_t, uint8_t, uint8_t> colors_rgb;
-                colors_rgb = stacked_jet( src_original->points[i].z, jet_stacking_threshold);
+                colors_rgb = stacked_jet( src_downsampled_1->points[i].z, jet_stacking_threshold);
 
                 std::uint32_t rgb = (static_cast<std::uint32_t>(std::get<0>(colors_rgb)) << 16 |
                                      static_cast<std::uint32_t>(std::get<1>(colors_rgb)) << 8 |
                                      static_cast<std::uint32_t>(std::get<2>(colors_rgb)));
                 pointrgb.rgb = *reinterpret_cast<float*>(&rgb);
-                src_original->points[i].r = pointrgb.r;
-                src_original->points[i].g = pointrgb.g;
-                src_original->points[i].b = pointrgb.b;
+                src_downsampled_1->points[i].r = pointrgb.r;
+                src_downsampled_1->points[i].g = pointrgb.g;
+                src_downsampled_1->points[i].b = pointrgb.b;
             }
             // Fill the cloud with some points
-            for (std::size_t i = 0; i < tgt_transformed->points.size (); ++i){
+            for (std::size_t i = 0; i < tgt_downsampled_2_transformed->points.size (); ++i){
                 pcl::PointXYZRGB pointrgb;
                 std::tuple<uint8_t, uint8_t, uint8_t> colors_rgb;
-                colors_rgb = stacked_jet( tgt_transformed->points[i].z, jet_stacking_threshold);
+                colors_rgb = stacked_jet( tgt_downsampled_2_transformed->points[i].z, jet_stacking_threshold);
                 //colors_rgb = jet(( tgt_original->points[i].z -  total_min_z)/(total_max_z - total_min_z));
                 std::uint32_t rgb = (static_cast<std::uint32_t>(std::get<0>(colors_rgb)) << 16 |
                                      static_cast<std::uint32_t>(std::get<1>(colors_rgb)) << 8 |
                                      static_cast<std::uint32_t>(std::get<2>(colors_rgb)));
                 pointrgb.rgb = *reinterpret_cast<float*>(&rgb);
-                tgt_transformed->points[i].r = pointrgb.r;
-                tgt_transformed->points[i].g = pointrgb.g;
-                tgt_transformed->points[i].b = pointrgb.b;
+                tgt_downsampled_2_transformed->points[i].r = pointrgb.r;
+                tgt_downsampled_2_transformed->points[i].g = pointrgb.g;
+                tgt_downsampled_2_transformed->points[i].b = pointrgb.b;
             }
         }else{
             //regular section
-            for (std::size_t i = 0; i < src_original->points.size (); ++i){
+            for (std::size_t i = 0; i < src_downsampled_1->points.size (); ++i){
                 pcl::PointXYZRGB pointrgb;
                 std::tuple<uint8_t, uint8_t, uint8_t> colors_rgb;
-                colors_rgb = jet(( src_original->points[i].z -  total_min_z)/(total_max_z - total_min_z));
+                colors_rgb = jet(( src_downsampled_1->points[i].z -  total_min_z)/(total_max_z - total_min_z));
                 std::uint32_t rgb = (static_cast<std::uint32_t>(std::get<0>(colors_rgb)) << 16 |
                                      static_cast<std::uint32_t>(std::get<1>(colors_rgb)) << 8 |
                                      static_cast<std::uint32_t>(std::get<2>(colors_rgb)));
                 pointrgb.rgb = *reinterpret_cast<float*>(&rgb);
-                src_original->points[i].r = pointrgb.r;
-                src_original->points[i].g = pointrgb.g;
-                src_original->points[i].b = pointrgb.b;
+                src_downsampled_1->points[i].r = pointrgb.r;
+                src_downsampled_1->points[i].g = pointrgb.g;
+                src_downsampled_1->points[i].b = pointrgb.b;
             }
             // Fill the cloud with some points
-            for (std::size_t i = 0; i < tgt_transformed->points.size (); ++i){
+            for (std::size_t i = 0; i < tgt_downsampled_2_transformed->points.size (); ++i){
                 pcl::PointXYZRGB pointrgb;
                 std::tuple<uint8_t, uint8_t, uint8_t> colors_rgb;
-                colors_rgb = jet(( tgt_transformed->points[i].z -  total_min_z)/(total_max_z - total_min_z));
+                colors_rgb = jet(( tgt_downsampled_2_transformed->points[i].z -  total_min_z)/(total_max_z - total_min_z));
                 std::uint32_t rgb = (static_cast<std::uint32_t>(std::get<0>(colors_rgb)) << 16 |
                                      static_cast<std::uint32_t>(std::get<1>(colors_rgb)) << 8 |
                                      static_cast<std::uint32_t>(std::get<2>(colors_rgb)));
                 pointrgb.rgb = *reinterpret_cast<float*>(&rgb);
-                tgt_transformed->points[i].r = pointrgb.r;
-                tgt_transformed->points[i].g = pointrgb.g;
-                tgt_transformed->points[i].b = pointrgb.b;
+                tgt_downsampled_2_transformed->points[i].r = pointrgb.r;
+                tgt_downsampled_2_transformed->points[i].g = pointrgb.g;
+                tgt_downsampled_2_transformed->points[i].b = pointrgb.b;
             }
         }
     }
 
 
 
+    //cerr << "Src PointCloud after decimation: " << src_downsampled_1->width * src_downsampled_1->height << " data points (" << pcl::getFieldsList(*src_downsampled_1) << ")." << endl;
 
-
-    // Create the filtering object
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr src_decimated(new pcl::PointCloud<pcl::PointXYZRGB>);
-    pcl::VoxelGrid<pcl::PointXYZRGB> sor;
-    sor.setInputCloud(src_original);
-    sor.setLeafSize(LEAF_SIZE, LEAF_SIZE, LEAF_SIZE);
-    sor.filter(*src_decimated);
-
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt_decimated(new pcl::PointCloud<pcl::PointXYZRGB>);
-    sor.setInputCloud(tgt_transformed);
-    sor.setLeafSize(LEAF_SIZE, LEAF_SIZE, LEAF_SIZE);
-    sor.filter(*tgt_decimated);
-
-    cerr << "Src PointCloud after decimation: " << src_decimated->width * src_decimated->height
-        << " data points (" << pcl::getFieldsList(*src_decimated) << ")." << endl;
-
-    cerr << "Tgt PointCloud after decimation: " << tgt_decimated->width * tgt_decimated->height
-        << " data points (" << pcl::getFieldsList(*tgt_decimated) << ")." << endl;
+    //cerr << "Tgt PointCloud after decimation: " << tgt_downsampled_2_transformed->width * tgt_downsampled_2_transformed->height << " data points (" << pcl::getFieldsList(*tgt_downsampled_2_transformed) << ")." << endl;
 
     // Filtered point cloud copy
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr src(new pcl::PointCloud<pcl::PointXYZRGB>);
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt(new pcl::PointCloud<pcl::PointXYZRGB>);
-    src = src_decimated;
-    tgt = tgt_decimated;
+    src = src_downsampled_1;
+    tgt = tgt_downsampled_2_transformed;
 
     // Compute the best transformtion
     // Copying the pointwithscale to pointxyz so as visualize the cloud
     pcl::PointCloud<pcl::PointXYZ>::Ptr keypoints_src_visualize_temp(new pcl::PointCloud<pcl::PointXYZ>);
     pcl::PointCloud<pcl::PointXYZ>::Ptr keypoints_tgt_visualize_temp(new pcl::PointCloud<pcl::PointXYZ>);
 
-
-    // Find correspondences between keypoints in FPFH space
-    //pcl::CorrespondencesPtr good_correspondences(new pcl::Correspondences);
-
     // Obtain the initial transformation matirx by using the key-points
-    //Eigen::Matrix4f transform;
+    Eigen::Matrix4f transform;
+    double normal_radius=5.25;
+/*
     compute_keypoints(src, tgt, keypoints_src_visualize_temp, keypoints_tgt_visualize_temp, keypoint_method,
             min_scale_SIFT, nr_octaves_SIFT, nr_scales_per_octave_SIFT, min_contrast_SIFT,
             set_radius_harris, set_radius_search_harris,HarrisRosponseMethod,
-            SalientRad_muliplier_ISS, NonMaxMultiplier_ISS, Threshold21_ISS, Threshold32_ISS, setMinNeighbors_ISS, setNumberOfThreads_ISS);
+            SalientRad_muliplier_ISS, NonMaxMultiplier_ISS, Threshold21_ISS, Threshold32_ISS, setMinNeighbors_ISS, setNumberOfThreads_ISS,normal_radius);
+*/
     //cout << "Initial Transformation Matrix" << endl;
     //std::cout << transform << std::endl;
 
-    // Time end (main computation)
-    time(&end_computation);
-    double time_elapsed_computation = difftime(end_computation, start_computation);
-    cout << "Elasped computation time in seconds: " << time_elapsed_computation << endl;
+
+    pcl::PointCloud<pcl::PointWithScale>::Ptr keypoints_1_withScale( new pcl::PointCloud<pcl::PointWithScale>() );
+    pcl::PointCloud<pcl::PointWithScale>::Ptr keypoints_2_withScale( new pcl::PointCloud<pcl::PointWithScale>() );
+
+    keypoints_1_withScale=iss3d_PointWithScale(src_downsampled_1);
+    keypoints_2_withScale=iss3d_PointWithScale(tgt_downsampled_2_transformed);
+
+    std::cout << "src_downsampled_1  :" << src_downsampled_1->size() << std::endl;
+    std::cout << "tgt_downsampled_2_transformed :" << tgt_downsampled_2_transformed->size() << std::endl;
+    std::cout << "keypoints_1_withScale  :" << keypoints_1_withScale->size() << std::endl;
+    std::cout << "keypoints_2_withScale :" << keypoints_2_withScale->size() << std::endl;
+
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr keypoints_1( new pcl::PointCloud<pcl::PointXYZRGB>() );
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr keypoints_2( new pcl::PointCloud<pcl::PointXYZRGB>() );
+    //keypoints_1=  iss3d(src_downsampled_1);
+    //keypoints_2=  iss3d(tgt_downsampled_2_transformed);
+    //todo check the differennc with the ISS parameter
+    keypoints_1=  iss3d(src_downsampled_1, SalientRad_muliplier_ISS, NonMaxMultiplier_ISS, Threshold21_ISS, Threshold32_ISS, setMinNeighbors_ISS, setNumberOfThreads_ISS);
+    keypoints_2=  iss3d(tgt_downsampled_2_transformed, SalientRad_muliplier_ISS, NonMaxMultiplier_ISS, Threshold21_ISS, Threshold32_ISS, setMinNeighbors_ISS, setNumberOfThreads_ISS);
+
+
+    std::cout << "keypoints_1  :" << keypoints_1->size() << std::endl;
+    std::cout << "keypoints_2 :" << keypoints_2->size() << std::endl;
+
+
+
+    pcl::PointCloud<pcl::Normal>::Ptr normals_1( new pcl::PointCloud<pcl::Normal>() );
+    pcl::PointCloud<pcl::Normal>::Ptr normals_2( new pcl::PointCloud<pcl::Normal>() );
+
+
+    //float normal_radius =5.;//100.1; //0.1
+    //normals = normal_extraction( cloud, keypoints, normal_radius);
+    //normals_1 = normal_extraction( cloud_1, src_downsampled_1, normal_radius);
+    //normals_2 = normal_extraction( cloud_2, tgt_downsampled_2_transformed, normal_radius);
+    //---alternative nomral calculation
+
+    //todo maybe change the src_original to the downsampled version
+    // normal extraction in omp
+    normals_1 = normal_extraction_omp( src_original, src_downsampled_1, normal_radius ); //works fine with the features
+    normals_2 = normal_extraction_omp( tgt_original, tgt_downsampled_2_transformed, normal_radius ); //works fine with the features
+
+
+    //------------------------------------------------------------
+    //------calc features-------
+    //------------------------------------------------------------
+
+    // ----- RIFT feature -----
+    double GradientEstimationsetRadiusSearch=5; //1000.001
+    double RadiusSearch=5.25;//100.05
+    double NrDistanceBins=4;
+    double NrGradientBins=8;
+    pcl::PointCloud<RIFT32 >::Ptr descrs_RIFT32_1( new pcl::PointCloud<RIFT32 >() );
+    descrs_RIFT32_1=rift_extraction( src_downsampled_1, src_downsampled_1, normals_1, GradientEstimationsetRadiusSearch, RadiusSearch, NrDistanceBins, NrGradientBins ); //cloud, keypoints, normals
+    pcl::console::print_value( "RIFT_1 returned features %d \n", descrs_RIFT32_1->size());
+
+    pcl::PointCloud<RIFT32 >::Ptr descrs_RIFT32_2( new pcl::PointCloud<RIFT32 >() );
+    descrs_RIFT32_2=rift_extraction( tgt_downsampled_2_transformed, tgt_downsampled_2_transformed, normals_2, GradientEstimationsetRadiusSearch, RadiusSearch, NrDistanceBins, NrGradientBins ); //cloud, keypoints, normals
+    pcl::console::print_value( "RIFT_2 returned features %d \n", descrs_RIFT32_2->size());
+
+    // ----- 3DSC feature -----
+    double setRadiusSearch_Shape=5.25;//0.01;
+    double setMinimalRadius_div=5;
+    double setPointDensityRadius_div=10;
+
+    pcl::PointCloud<pcl::ShapeContext1980>::Ptr descrs_ShapeContext1980_1( new pcl::PointCloud<pcl::ShapeContext1980>() );
+    descrs_ShapeContext1980_1=sc_extraction( src_downsampled_1, keypoints_1, normals_1, setRadiusSearch_Shape, setMinimalRadius_div, setPointDensityRadius_div);  // cloud, keypoints, normals  //works with normal_radius 100, but not with 10 or 1
+    pcl::console::print_value( "ShapeContext1980_1 returned features %d \n", descrs_ShapeContext1980_1->size() );
+
+    pcl::PointCloud<pcl::ShapeContext1980>::Ptr descrs_ShapeContext1980_2( new pcl::PointCloud<pcl::ShapeContext1980>() );
+    descrs_ShapeContext1980_2=sc_extraction( tgt_downsampled_2_transformed, keypoints_2, normals_2, setRadiusSearch_Shape, setMinimalRadius_div, setPointDensityRadius_div);  // cloud, keypoints, normals  //works with normal_radius 100, but not with 10 or 1
+    pcl::console::print_value( "ShapeContext1980_2 returned features %d \n", descrs_ShapeContext1980_2->size() );
+
+    // ----- USC feature -----
+    double RadiusSearch_USC=5.25;//0.01;
+    double setMinimalRadius_div_USC=5;
+    double setPointDensityRadius_div_USC=10;
+    double LocalRadiusSearch_USC=5.25;
+
+    pcl::PointCloud<pcl::UniqueShapeContext1960>::Ptr descrs_UniqueShapeContext1960_1( new pcl::PointCloud<pcl::UniqueShapeContext1960>() );
+    descrs_UniqueShapeContext1960_1=usc_extraction( src_downsampled_1, keypoints_1, normals_1, RadiusSearch_USC,setMinimalRadius_div_USC,setPointDensityRadius_div_USC,LocalRadiusSearch_USC);  // cloud, keypoints, normals  //works with normal_radius 100, but not with 10 or 1
+    pcl::console::print_value( "UniqueShapeContext1960_1 returned features %d \n", descrs_ShapeContext1980_1->size() );
+
+    pcl::PointCloud<pcl::UniqueShapeContext1960>::Ptr descrs_UniqueShapeContext1960_2( new pcl::PointCloud<pcl::UniqueShapeContext1960>() );
+    descrs_UniqueShapeContext1960_2=usc_extraction( tgt_downsampled_2_transformed, keypoints_2, normals_2, RadiusSearch_USC,setMinimalRadius_div_USC,setPointDensityRadius_div_USC,LocalRadiusSearch_USC);  // cloud, keypoints, normals  //works with normal_radius 100, but not with 10 or 1
+    pcl::console::print_value( "UniqueShapeContext1960_2 returned features %d \n", descrs_ShapeContext1980_2->size() );
+
+    // ----- RSD feature -----
+    double setRadiusSearch_RSD=0.05;//15.25;//0.5;
+    double setPlaneRadius=0.01;//10.25;//0.01;
+    pcl::PointCloud<pcl::PrincipalRadiiRSD>::Ptr descrs_rsd_1( new pcl::PointCloud<pcl::PrincipalRadiiRSD>() );
+    descrs_rsd_1=rsd_extraction( src_downsampled_1, keypoints_1, normals_1, setRadiusSearch_RSD, setPlaneRadius); //cloud, keypoints, normals
+    pcl::console::print_value( "PrincipalRadiiRSD_1 (RSD) returned features %d \n", descrs_rsd_1->size() );
+
+    pcl::PointCloud<pcl::PrincipalRadiiRSD>::Ptr descrs_rsd_2( new pcl::PointCloud<pcl::PrincipalRadiiRSD>() );
+    descrs_rsd_2=rsd_extraction( tgt_downsampled_2_transformed, keypoints_2, normals_2, setRadiusSearch_RSD, setPlaneRadius ); //cloud, keypoints, normals
+    pcl::console::print_value( "PrincipalRadiiRSD_2 (RSD) returned features %d \n", descrs_rsd_2->size() );
+
+    // ----- SHOT feature -----
+    double setRadiusSearch_SHOT=5.25;
+    pcl::PointCloud<pcl::SHOT352>::Ptr descrs_shot_1( new pcl::PointCloud<pcl::SHOT352>() );
+    descrs_shot_1=shot_extraction( src_downsampled_1, keypoints_1, normals_1,setRadiusSearch_SHOT );//cloud, keypoints, normals
+    pcl::console::print_value( "SHOT_1 returned features %d \n", descrs_shot_1->size() );
+
+    pcl::PointCloud<pcl::SHOT352>::Ptr descrs_shot_2( new pcl::PointCloud<pcl::SHOT352>() );
+    descrs_shot_2=shot_extraction( tgt_downsampled_2_transformed, keypoints_2, normals_2,setRadiusSearch_SHOT );//cloud, keypoints, normals
+    pcl::console::print_value( "SHOT_2 returned features %d \n", descrs_shot_2->size() );
+
+    pcl::PointCloud<pcl::SHOT352>::Ptr descrs_shot_omp_1( new pcl::PointCloud<pcl::SHOT352>() );
+    descrs_shot_omp_1=shot_extraction_omp( src_downsampled_1, keypoints_1, normals_1,setRadiusSearch_SHOT );//cloud, keypoints, normals
+    pcl::console::print_value( "SHOT_OMP_1 returned features %d \n", descrs_shot_omp_1->size() );
+
+    pcl::PointCloud<pcl::SHOT352>::Ptr descrs_shot_omp_2( new pcl::PointCloud<pcl::SHOT352>() );
+    descrs_shot_omp_2=shot_extraction_omp( tgt_downsampled_2_transformed, keypoints_2, normals_2,setRadiusSearch_SHOT );//cloud, keypoints, normals
+    pcl::console::print_value( "SHOT_OMP_2 returned features %d \n", descrs_shot_omp_2->size() );
+
+    pcl::PointCloud<pcl::SHOT1344>::Ptr descrs_cshot_1( new pcl::PointCloud<pcl::SHOT1344>() );
+    descrs_cshot_1=cshot_extraction( src_downsampled_1, keypoints_1, normals_1 ,setRadiusSearch_SHOT);//cloud, keypoints, normals
+    pcl::console::print_value( "CSHOT_1 returned features %d \n", descrs_cshot_1->size() );
+
+    pcl::PointCloud<pcl::SHOT1344>::Ptr descrs_cshot_2( new pcl::PointCloud<pcl::SHOT1344>() );
+    descrs_cshot_2=cshot_extraction( tgt_downsampled_2_transformed, keypoints_2, normals_2 ,setRadiusSearch_SHOT);//cloud, keypoints, normals
+    pcl::console::print_value( "CSHOT_2 returned features %d \n", descrs_cshot_2->size() );
+
+    pcl::PointCloud<pcl::SHOT1344>::Ptr descrs_cshot_omp_1( new pcl::PointCloud<pcl::SHOT1344>() );
+    descrs_cshot_omp_1=cshot_extraction_omp( src_downsampled_1, keypoints_1, normals_1,setRadiusSearch_SHOT );//cloud, keypoints, normals
+    pcl::console::print_value( "CSHOT_OMP_1 returned features %d \n", descrs_cshot_omp_1->size() );
+
+    pcl::PointCloud<pcl::SHOT1344>::Ptr descrs_cshot_omp_2( new pcl::PointCloud<pcl::SHOT1344>() );
+    descrs_cshot_omp_2=cshot_extraction_omp( tgt_downsampled_2_transformed, keypoints_2, normals_2, setRadiusSearch_SHOT );//cloud, keypoints, normals
+    pcl::console::print_value( "CSHOT_OMP_2 returned features %d \n", descrs_cshot_omp_2->size() );
+
+    // ----- FPFH feature -----
+    double searchRadius_FPFH=5.25; //0.05
+    pcl::PointCloud<pcl::FPFHSignature33>::Ptr descrs_fpfh_1( new pcl::PointCloud<pcl::FPFHSignature33>() );
+    descrs_fpfh_1=fpfh_extraction( src_downsampled_1, keypoints_1, normals_1, searchRadius_FPFH);//cloud, keypoints, normals
+    pcl::console::print_value( "FPFH_1 returned features %d \n", descrs_fpfh_1->size() );
+
+    pcl::PointCloud<pcl::FPFHSignature33>::Ptr descrs_fpfh_2( new pcl::PointCloud<pcl::FPFHSignature33>() );
+    descrs_fpfh_2=fpfh_extraction( tgt_downsampled_2_transformed, keypoints_2, normals_2,searchRadius_FPFH );//cloud, keypoints, normals
+    pcl::console::print_value( "FPFH_2 returned features %d \n", descrs_fpfh_2->size() );
+
+    pcl::PointCloud<pcl::FPFHSignature33>::Ptr descrs_fpfh_omp_1( new pcl::PointCloud<pcl::FPFHSignature33>() );
+    descrs_fpfh_omp_1=fpfh_extraction_omp( src_downsampled_1, keypoints_1, normals_1, searchRadius_FPFH);//cloud, keypoints, normals
+    pcl::console::print_value( "FPFH_OMP_1 returned features %d \n", descrs_fpfh_omp_1->size() );
+
+    pcl::PointCloud<pcl::FPFHSignature33>::Ptr descrs_fpfh_omp_2( new pcl::PointCloud<pcl::FPFHSignature33>() );
+    descrs_fpfh_omp_2=fpfh_extraction_omp( tgt_downsampled_2_transformed, keypoints_2, normals_2, searchRadius_FPFH);//cloud, keypoints, normals
+    pcl::console::print_value( "FPFH_OMP_2 returned features %d \n", descrs_fpfh_omp_2->size() );
+
+    // ----- PFH feature -----
+    float feature_radius=0.08;
+    feature_radius=15.66;
+    pcl::PointCloud<pcl::PFHSignature125>::Ptr descrs_pfh_1( new pcl::PointCloud<pcl::PFHSignature125>() );
+    descrs_pfh_1=pfh_extraction( src_downsampled_1, keypoints_1, normals_1 ,feature_radius );//cloud, keypoints, normals
+    pcl::console::print_value( "PFH_1 returned features %d \n", descrs_pfh_1->size() );
+
+    pcl::PointCloud<pcl::PFHSignature125>::Ptr descrs_pfh_2( new pcl::PointCloud<pcl::PFHSignature125>() );
+    descrs_pfh_2=pfh_extraction( tgt_downsampled_2_transformed, keypoints_2, normals_2 ,feature_radius );//cloud, keypoints, normals
+    pcl::console::print_value( "PFH_2 returned features %d \n", descrs_pfh_2->size() );
+
+    // ----- PFHRGB feature -----
+    double feature_radius_PFHRGB=5.25;//0.05
+    pcl::PointCloud<pcl::PFHRGBSignature250>::Ptr descrs_pfhrgb_1( new pcl::PointCloud<pcl::PFHRGBSignature250>() );
+    descrs_pfhrgb_1=pfhrgb_extraction( src_downsampled_1, keypoints_1, normals_1, feature_radius_PFHRGB);//cloud, keypoints, normals
+    pcl::console::print_value( "PFHRGB_1 returned features %d \n", descrs_pfhrgb_1->size() );
+
+    pcl::PointCloud<pcl::PFHRGBSignature250>::Ptr descrs_pfhrgb_2( new pcl::PointCloud<pcl::PFHRGBSignature250>() );
+    descrs_pfhrgb_2=pfhrgb_extraction( tgt_downsampled_2_transformed, keypoints_2, normals_2, feature_radius_PFHRGB);//cloud, keypoints, normals
+    pcl::console::print_value( "PFHRGB_2 returned features %d \n", descrs_pfhrgb_2->size() );
+
+
+    //--------------------------------------------------------
+    // Find feature correspondences
+    std::vector<int> correspondences;
+    std::vector<float> correspondence_scores;
+
+    find_feature_correspondences_PFH (descrs_pfh_1, descrs_pfh_2, correspondences, correspondence_scores);    //todo get the correspondence_scores for the evaluation
+    std::cout << "Finished find  correspondences" << std::endl;
+
+    cout << "PFHR descriptor: " << descrs_pfh_1->size() << endl;
+    cout << "PFHRGB descriptor: " << descrs_pfhrgb_1->size() << endl;
+
+    // Find correspondences between keypoints in FPFH space
+    pcl::CorrespondencesPtr all_correspondences_PFH(new pcl::Correspondences);
+    findCorrespondences_PFH_newshort(descrs_pfh_1, descrs_pfh_2, *all_correspondences_PFH);
+    //findCorrespondences_PFH_newshort(pfhs_src_rgb, pfhs_tgt_rgb, *all_correspondences_new);
+    pcl::CorrespondencesPtr good_correspondences_PFH(new pcl::Correspondences);
+    rejectBadCorrespondences(all_correspondences_PFH, keypoints_1_withScale, keypoints_2_withScale, *good_correspondences_PFH);
+    cout << "End of rejectBadCorrespondences! " << endl;
+    cout << "PFH All correspondences size: " << all_correspondences_PFH->size() << endl;
+    cout << "PFH Good correspondences size: " << good_correspondences_PFH->size() << endl;
+
+    // Find correspondences between keypoints in FPFH space
+    pcl::CorrespondencesPtr all_correspondences_PFHRGB(new pcl::Correspondences);
+    pcl::CorrespondencesPtr good_correspondences_PFHRGB(new pcl::Correspondences);
+
+
+    findCorrespondences_PFHRGB(descrs_pfhrgb_1, descrs_pfhrgb_1, *all_correspondences_PFHRGB);
+    //cout << "PFHRGB All correspondences size: " << all_correspondences_PFHRGB->size() << endl;
+    rejectBadCorrespondences(all_correspondences_PFHRGB, keypoints_1_withScale, keypoints_2_withScale, *good_correspondences_PFHRGB);
+    cout << "End of rejectBadCorrespondences! " << endl;
+    cout << "PFHRGB All correspondences size: " << all_correspondences_PFHRGB->size() << endl;
+    cout << "PFHRGB Good correspondences size: " << good_correspondences_PFHRGB->size() << endl;
+
+    // PFHRGB Estimation
+    pcl::PointCloud <pcl::PFHRGBSignature250>::Ptr fpfhs_src_rgb(new pcl::PointCloud<pcl::PFHRGBSignature250>);
+    pcl::PointCloud <pcl::PFHRGBSignature250>::Ptr fpfhs_tgt_rgb(new pcl::PointCloud<pcl::PFHRGBSignature250>);
+
+    feature_radius=5.25;
+    compute_PFHRGB_features(src_downsampled_1, normals_1, keypoints_1_withScale, fpfhs_src_rgb,feature_radius);
+    compute_PFHRGB_features(tgt_downsampled_2_transformed, normals_2, keypoints_2_withScale, fpfhs_tgt_rgb,feature_radius);
+    pcl::CorrespondencesPtr all_correspondences_PFHRGB_new(new pcl::Correspondences);
+    pcl::CorrespondencesPtr good_correspondences_PFHRGB_new(new pcl::Correspondences);
+    findCorrespondences_PFHRGB(fpfhs_src_rgb, fpfhs_tgt_rgb, *all_correspondences_PFHRGB_new);
+    rejectBadCorrespondences(all_correspondences_PFHRGB_new, keypoints_1_withScale, keypoints_2_withScale, *good_correspondences_PFHRGB_new);
+    cout << "End of rejectBadCorrespondences! " << endl;
+    cout << "NEW PFHRGB All correspondences size: " << all_correspondences_PFHRGB_new->size() << endl;
+    cout << "NEW PFHRGB Good correspondences size: " << good_correspondences_PFHRGB_new->size() << endl;
+
+
+    pcl::CorrespondencesPtr all_correspondences_SHOT352(new pcl::Correspondences);
+    pcl::CorrespondencesPtr good_correspondences_SHOT352(new pcl::Correspondences);
+    findCorrespondences_SHOT352(descrs_shot_1, descrs_shot_2, *all_correspondences_SHOT352);
+    rejectBadCorrespondences(all_correspondences_SHOT352, keypoints_1_withScale, keypoints_2_withScale, *good_correspondences_SHOT352);
+    cout << "End of rejectBadCorrespondences! " << endl;
+    cout << "SHOT352 All correspondences size: " << all_correspondences_SHOT352->size() << endl;
+    cout << "SHOT352 Good correspondences size: " << good_correspondences_SHOT352->size() << endl;
+
+
+    pcl::CorrespondencesPtr all_correspondences_SHOT1344(new pcl::Correspondences);
+    pcl::CorrespondencesPtr good_correspondences_SHOT1344(new pcl::Correspondences);
+    findCorrespondences_SHOT1344(descrs_cshot_1, descrs_cshot_2, *all_correspondences_SHOT1344);
+    rejectBadCorrespondences(all_correspondences_SHOT1344, keypoints_1_withScale, keypoints_2_withScale, *good_correspondences_SHOT1344);
+    cout << "End of rejectBadCorrespondences! " << endl;
+    cout << "SHOT1344 All correspondences size: " << all_correspondences_SHOT1344->size() << endl;
+    cout << "SHOT1344 Good correspondences size: " << good_correspondences_SHOT1344->size() << endl;
+
+
+    pcl::CorrespondencesPtr all_correspondences_PrincipalRadiiRSD(new pcl::Correspondences);
+    pcl::CorrespondencesPtr good_correspondences_PrincipalRadiiRSD(new pcl::Correspondences);
+    findCorrespondences_PrincipalRadiiRSD(descrs_rsd_1, descrs_rsd_2, *all_correspondences_PrincipalRadiiRSD);
+    rejectBadCorrespondences(all_correspondences_PrincipalRadiiRSD, keypoints_1_withScale, keypoints_2_withScale, *good_correspondences_PrincipalRadiiRSD);
+    cout << "End of rejectBadCorrespondences! " << endl;
+    cout << "descrs_rsd_1 size: " << descrs_rsd_1->size() << endl;
+    cout << "descrs_rsd_2 size: " << descrs_rsd_2->size() << endl;
+    cout << "PrincipalRadiiRSD All correspondences size: " << all_correspondences_PrincipalRadiiRSD->size() << endl;
+    cout << "PrincipalRadiiRSD Good correspondences size: " << good_correspondences_PrincipalRadiiRSD->size() << endl;
+
+    pcl::CorrespondencesPtr all_correspondences_ShapeContext1980(new pcl::Correspondences);
+    pcl::CorrespondencesPtr good_correspondences_ShapeContext1980(new pcl::Correspondences);
+    findCorrespondences_ShapeContext1980(descrs_ShapeContext1980_1, descrs_ShapeContext1980_2, *all_correspondences_ShapeContext1980);
+    rejectBadCorrespondences(all_correspondences_ShapeContext1980, keypoints_1_withScale, keypoints_2_withScale, *good_correspondences_ShapeContext1980);
+    cout << "End of rejectBadCorrespondences! " << endl;
+    cout << "ShapeContext1980 All correspondences size: " << all_correspondences_ShapeContext1980->size() << endl;
+    cout << "ShapeContext1980 Good correspondences size: " << good_correspondences_ShapeContext1980->size() << endl;
+
+
+    pcl::CorrespondencesPtr all_correspondences_FPFHSignature33(new pcl::Correspondences);
+    pcl::CorrespondencesPtr good_correspondences_FPFHSignature33(new pcl::Correspondences);
+    findCorrespondences_FPFHSignature33(descrs_fpfh_1, descrs_fpfh_2, *all_correspondences_FPFHSignature33);
+    rejectBadCorrespondences(all_correspondences_FPFHSignature33, keypoints_1_withScale, keypoints_2_withScale, *good_correspondences_FPFHSignature33);
+    cout << "End of rejectBadCorrespondences! " << endl;
+    cout << "FPFHSignature33 All correspondences size: " << all_correspondences_FPFHSignature33->size() << endl;
+    cout << "FPFHSignature33 Good correspondences size: " << good_correspondences_FPFHSignature33->size() << endl;
+
+
+    pcl::CorrespondencesPtr all_correspondences_UniqueShapeContext1960(new pcl::Correspondences);
+    pcl::CorrespondencesPtr good_correspondences_UniqueShapeContext1960(new pcl::Correspondences);
+    cout << "before  findCorrespondences_UniqueShapeContext1960" << endl;
+    findCorrespondences_UniqueShapeContext1960(descrs_UniqueShapeContext1960_1, descrs_UniqueShapeContext1960_2, *all_correspondences_UniqueShapeContext1960);
+    cout << "before  rejectBadCorrespondences" << endl;
+    rejectBadCorrespondences(all_correspondences_UniqueShapeContext1960, keypoints_1_withScale, keypoints_2_withScale, *good_correspondences_UniqueShapeContext1960);
+    cout << "End of rejectBadCorrespondences! " << endl;
+    cout << "UniqueShapeContext1960 All correspondences size: " << all_correspondences_UniqueShapeContext1960->size() << endl;
+    cout << "UniqueShapeContext1960 Good correspondences size: " << good_correspondences_UniqueShapeContext1960->size() << endl;
+
+    //-------------------------------------------------------------
+
+
+
 
     //---------------get basic keypoint ratio---------------------
     pcl::PointXYZRGB minPt1, maxPt1, minPt2, maxPt2;;
@@ -1006,8 +1958,6 @@ int main(int argc, char** argv) {
     mapsample_2.set_values(minPt2.x, minPt2.y, minPt2.z,maxPt2.x, maxPt2.y, maxPt2.z);
     get_overlap(mapsample_1, mapsample_2, submap_overlap);
 
-    //mapsample_1.set_values(-100.0,-100.0,-100.0,100.0,10.0,10.0); // old values -> set to min max instead
-    //mapsample_2.set_values(-200.0,-50.0,-120.0,50.0,10.0,0.0);    // old values -> set to min max instead
 
     std::cout << "Overlap details: " << "Submap 1 details: "<< "Submap 1 details: " << std::endl;
     std::cout << "Max x: " << submap_overlap.maxX << "   Max x: " << maxPt1.x << "   Max x: " << maxPt2.x << std::endl;
@@ -1020,22 +1970,8 @@ int main(int argc, char** argv) {
         keypoint_evaluation(submap_overlap, keypoints_src_visualize_temp, keypoints_tgt_visualize_temp); //potherwise done later
     }
 
-    //-------------------------------------------------------
 
-
-
-    //todo active for saving only
-    if(0 ){
-        pcl::PCDWriter writer;
-        pcl::io::savePCDFile( "keypoints_src_visualize_temp.pcd", *keypoints_src_visualize_temp, true );
-        std::cout << "Save succesfully keypoints_src_visualize_temp" << std::endl;
-        pcl::io::savePCDFile( "keypoints_tgt_visualize_temp.pcd", *keypoints_src_visualize_temp, true );
-        std::cout << "Save succesfully keypoints_tgt_visualize_temp" << std::endl;
-    }
-
-
-
-// Visualization of keypoints along with the original cloud and correspondences
+    // Visualization of keypoints along with the original cloud and correspondences
     pcl::visualization::PCLVisualizer corresp_viewer("Correspondences Viewer");
     if(grid_flag!=1){
         corresp_viewer.setBackgroundColor(0, 0, 0);
@@ -1071,32 +2007,7 @@ int main(int argc, char** argv) {
     double r =0, g=0, b=0, distance=0;
     pcl::PointXYZ tgt_transformed_tmp;  //descripes the target point in with the applied transformation in the new coordinate system
 
-    //additional correspondences rejection based on the z difference (the z distance can be assumed to be more accurate)
-    /*
-    if(z_rejection_flag==1){
-        pcl::CorrespondencesPtr final_correspondences (new pcl::Correspondences ());
-        int correspondenc_cnt=0;
-        double correspondencZthresh=(jet_stacking_threshold/4)-5;
-        std::cout << "correspondencZthresh: "<<correspondencZthresh<< std::endl;
-        for (int i = 0; i < good_correspondences->size(); ++i) {
-            pcl::PointXYZ & src_idx = keypoints_src_visualize_temp->points[(*good_correspondences)[i].index_query];
-            pcl::PointXYZ & tgt_idx = keypoints_tgt_visualize_temp->points[(*good_correspondences)[i].index_match];
-            //std::cout << "z dist: " << ( abs(abs( src_idx.z) -abs(tgt_idx.z )) )<< std::endl;
-            if( ( abs(abs( src_idx.z) -abs(tgt_idx.z )) ) < correspondencZthresh){
-                pcl::Correspondence c_tmp;
-                //c_tmp.index_match=(*good_correspondences)[i].index_query;
-                //c_tmp.index_match=(*good_correspondences)[i].index_match;
-                c_tmp=(*good_correspondences)[i];
-                final_correspondences->push_back (c_tmp);
-                correspondenc_cnt++;
-            }
-        }
-        std::cout << "correspondenc num before z rejection: "<<good_correspondences->size()<< std::endl;
-        std::cout << "correspondenc num after z rejection: "<<final_correspondences->size()<< std::endl;
-        good_correspondences=final_correspondences;
-        std::cout << "remapped correspondenc num z rejection: "<<good_correspondences->size()<< std::endl;
-    }
-    */
+
 
     /*
     for (int i = 0; i < good_correspondences->size(); ++i){
@@ -1144,6 +2055,7 @@ int main(int argc, char** argv) {
         }
         tgt_idx.z-=visu_dist;
     }
+
     */
     //add the virtual distance to the between the two clouds to make them better visual distinguishable
     for (std::size_t i = 0; i < tgt->points.size (); ++i) {
@@ -1161,30 +2073,7 @@ int main(int argc, char** argv) {
     }
 
 
-    /*
-    float exact_match_rate=0, evaluation_match_rate=0;
-    //cout << "All correspondences size: " << all_correspondences->size() << endl;
-    //cout << "Good correspondences size: " << good_correspondences->size() << endl;
-    //std::cout << "exact matched features: " << counter_correctFmatch << std::endl;
-    std::cout << "features in the validation region: " << counter_validationR << std::endl;
-    //exact_match_rate= (double) counter_correctFmatch / (double) good_correspondences->size () ;
-    std::cout << "Overlapping Rate of exact matching features: " << exact_match_rate << std::endl;
-    //evaluation_match_rate= (double) (counter_correctFmatch+counter_validationR) / (double) good_correspondences->size () ;
-    std::cout << "Overlapping Rate features in the validation range: " << evaluation_match_rate << std::endl;
-    std::cout << "with validation radius in: " << validation_radius_in << std::endl;
-    std::cout << "with validation radius out: " << validation_radius_out << std::endl;
-
-    std::cout << "----------------------------------------------------------------"  << std::endl;
-    std::cout << "bin results of the distance: " << std::endl;
-    std::cout << "bin 0 [0<=" << evaluation_distances [0] << "] :" << distance_bin_results[0]<< std::endl;
-    for(int counter=1;counter<9;counter++) {
-        std::cout << "bin " << counter << " [" << evaluation_distances [counter-1] << "<=" << evaluation_distances [counter] << "] :" << distance_bin_results[counter]<< std::endl;
-    }
-    std::cout << "bin 9 [" << evaluation_distances [8] << "<=...] :" << distance_bin_results[9]<< std::endl;
-*/
-
-
-    //write kez information to the measurement file in case e.g. for grid search
+    //write key information to the measurement file in case e.g. for grid search
     if(grid_flag==1){
         std::cout << "write to file " << std::endl;
         std::ofstream out;
@@ -1276,6 +2165,7 @@ int main(int argc, char** argv) {
         }
 */
         out <<",___,";
+        double time_elapsed_computation=0; //todo enter here the time needed for the calculation
         out << time_elapsed_computation << ","<< keypoints_1_inOverlap<< "," << keypoints_2_inOverlap <<","<< keypoints_src_visualize_temp->size()<< "," << keypoints_tgt_visualize_temp->size() <<","<<keypoint_Overlap_cnt<<","<< keypoint_Overlaparea_fit_cnt<<","<< overlap_rate_1<<"," << overlap_rate_2<<","<< total_overlap_rate_1<<","<< total_overlap_rate_2<<std::endl;
 
 
@@ -1330,9 +2220,9 @@ int main(int argc, char** argv) {
         corresp_viewer.close();
 
         // Time end (main function)
-        time(&end_total);
-        double time_elapsed_total = difftime(end_total, start_total);
-        cout << "Elasped total main function time in seconds: " << time_elapsed_total << endl;
+        //time(&end_total);
+        //double time_elapsed_total = difftime(end_total, start_total);
+        //cout << "Elasped total main function time in seconds: " << time_elapsed_total << endl;
     }
 }
 
