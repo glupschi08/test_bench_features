@@ -1346,6 +1346,89 @@ void keypoint_evaluation(Mapsample& submap_overlap, const pcl::PointCloud<pcl::P
 }
 
 
+
+int* correspondance_evaluation(const pcl::CorrespondencesPtr &good_correspondences,
+                               const pcl::PointCloud<pcl::PointWithScale>::Ptr &keypoints_src_visualize_temp,
+                               const pcl::PointCloud<pcl::PointWithScale>::Ptr &tgt_transformed_eval,
+                               double &counter_correctFmatch,
+                               double &counter_wrongFmatch,
+                               double &counter_validationR,
+                               const double validation_radius_in,
+                               const double validation_radius_out,
+                               int distance_bin_results[10]){
+
+/*
+void correspondance_evaluation(const pcl::CorrespondencesPtr &good_correspondences,
+                               const pcl::PointCloud<pcl::PointWithScale>::Ptr &keypoints_src_visualize_temp,
+                               const pcl::PointCloud<pcl::PointWithScale>::Ptr &tgt_transformed_eval,
+                               double &counter_correctFmatch,
+                               double &counter_wrongFmatch,
+                               double &counter_validationR,
+                               const double validation_radius_in,
+                               const double validation_radius_out){*/
+    double evaluation_distances[9] = {0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 1};
+    //int distance_bin_results[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    double x_diff=0, y_diff=0, distance=0;
+
+    for (int i = 0; i < good_correspondences->size(); ++i){
+
+        //pcl::PointXYZ & src_idx = keypoints_src_visualize_temp->points[(*good_correspondences)[i].index_query];
+        //pcl::PointXYZ & tgt_idx = keypoints_tgt_visualize_temp->points[(*good_correspondences)[i].index_match];
+        //pcl::PointXYZ & tgt_eval_idx = tgt_transformed_eval->points[(*good_correspondences)[i].index_match];
+        pcl::PointWithScale & src_idx = keypoints_src_visualize_temp->points[(*good_correspondences)[i].index_query];
+        ////pcl::PointXYZ & tgt_idx = keypoints_tgt_visualize_temp->points[(*good_correspondences)[i].index_match];
+        pcl::PointWithScale & tgt_eval_idx = tgt_transformed_eval->points[(*good_correspondences)[i].index_match];
+        string lineID = to_string(i);
+
+        //move this to a seperate function later
+        //calc the distance for the bin evaluation
+        x_diff=src_idx.x-(tgt_eval_idx.x);
+        y_diff=src_idx.y-(tgt_eval_idx.y);
+        distance=std::sqrt(x_diff * x_diff + y_diff * y_diff);
+
+        for(int counter=0;counter<10;counter++){
+            if(distance <evaluation_distances [counter]){
+                distance_bin_results[counter]+=1;
+                break;
+            }else if(counter==9){
+                distance_bin_results[9]+=1;
+            }
+        }
+
+        if ((src_idx.x - tgt_eval_idx.x) * (src_idx.x - tgt_eval_idx.x) +(src_idx.y - tgt_eval_idx.y) * (src_idx.y - tgt_eval_idx.y) <= validation_radius_in * validation_radius_in){
+                counter_correctFmatch++;
+        }else{
+            counter_wrongFmatch++;
+            // check if the corresponding point is at least within a certain validation radius
+            if ((src_idx.x - tgt_eval_idx.x) * (src_idx.x - tgt_eval_idx.x) +(src_idx.y - tgt_eval_idx.y) * (src_idx.y - tgt_eval_idx.y) <= validation_radius_out * validation_radius_out){
+                counter_validationR++;
+            }
+        }
+    }
+    if(1){
+        //output the bin results
+        std::cout << "--------------------------FEATURE--------------------------------------"  << std::endl;
+        std::cout << "counter_correctFmatch" << counter_correctFmatch << std::endl;
+        std::cout << "counter_wrongFmatch" << counter_wrongFmatch << std::endl;
+        std::cout << "counter_validationR" << counter_validationR << std::endl;
+
+        std::cout << "bin results of the distance: " << std::endl;
+        std::cout << "bin 0 [0<=" << evaluation_distances [0] << "] :" << distance_bin_results[0]<< std::endl;
+        for(int counter=1;counter<9;counter++) {
+            std::cout << "bin " << counter << " [" << evaluation_distances [counter-1] << "<=" << evaluation_distances [counter] << "] :" << distance_bin_results[counter]<< std::endl;
+        }
+        std::cout << "bin 9 [" << evaluation_distances [8] << "<=...] :" << distance_bin_results[9]<< std::endl;
+    }
+    //arr=distance_bin_results;
+    return distance_bin_results;
+    //return arr;
+}
+
+
+
+
+
+
 int main(int argc, char** argv) {
     int roation_flag=0, z_rejection_flag=0, cloud_filter_flag=0;
     int red=0, green=0, blue=0, jet_flag=0, grid_flag=0;
@@ -1565,6 +1648,31 @@ int main(int argc, char** argv) {
 
     add_noise_normal_distributedvoid(tgt_downsampled_2_transformed, noise_offset, noise_var, x_o, y_o, z_o, red, green, blue);
 
+
+    Eigen::Matrix4f transform_1 = Eigen::Matrix4f::Identity();
+    Eigen::Matrix4f transform_1_inverse = Eigen::Matrix4f::Identity();
+    if (roation_flag==1){
+        transform_1 (0,0) = std::cos(rot_alpha)*std::cos(rot_betha);
+        transform_1 (0,1) = std::cos(rot_alpha)*sin(rot_betha)*sin(rot_gamma)-sin(rot_alpha)*std::cos(rot_gamma);
+        transform_1 (0,2) = std::cos(rot_alpha)*sin(rot_betha)*std::cos(rot_gamma)+sin(rot_alpha)*sin(rot_gamma);
+
+        transform_1 (1,0) = sin(rot_alpha)*std::cos(rot_betha);
+        transform_1 (1,1) = sin(rot_alpha)*sin(rot_betha)*sin(rot_gamma)+std::cos(rot_alpha)*std::cos(rot_gamma);;
+        transform_1 (1,2) = std::cos(rot_alpha)*sin(rot_betha)*std::cos(rot_gamma)-sin(rot_alpha)*sin(rot_gamma);
+
+        transform_1 (2,0) = -sin(rot_betha);
+        transform_1 (2,1) = std::cos(rot_betha)*sin(rot_gamma);
+        transform_1 (2,2) = std::cos(rot_betha)*std::cos(rot_gamma);
+        /*
+        //add translation
+        transform_1 (0,3) =x_o;
+        transform_1 (1,3) =y_o;
+        transform_1 (3,3) =z_o;
+        */
+        pcl::transformPointCloud (*tgt_downsampled_2_transformed, *tgt_downsampled_2_transformed, transform_1);
+    }
+    transform_1_inverse = transform_1.inverse();
+
     if(jet_flag==1  || jet_flag==2){
         double total_min_z, total_max_z;
         pcl::PointXYZRGB minPt1, maxPt1,minPt2, maxPt2;;
@@ -1650,11 +1758,6 @@ int main(int argc, char** argv) {
     src = src_downsampled_1;
     tgt = tgt_downsampled_2_transformed;
 
-    // Compute the best transformtion
-    // Copying the pointwithscale to pointxyz so as visualize the cloud
-    pcl::PointCloud<pcl::PointXYZ>::Ptr keypoints_src_visualize_temp(new pcl::PointCloud<pcl::PointXYZ>);
-    pcl::PointCloud<pcl::PointXYZ>::Ptr keypoints_tgt_visualize_temp(new pcl::PointCloud<pcl::PointXYZ>);
-
     // Obtain the initial transformation matirx by using the key-points
     Eigen::Matrix4f transform;
     double normal_radius=5.25;
@@ -1674,6 +1777,7 @@ int main(int argc, char** argv) {
     keypoints_1_withScale=iss3d_PointWithScale(src_downsampled_1);
     keypoints_2_withScale=iss3d_PointWithScale(tgt_downsampled_2_transformed);
 
+
     std::cout << "src_downsampled_1  :" << src_downsampled_1->size() << std::endl;
     std::cout << "tgt_downsampled_2_transformed :" << tgt_downsampled_2_transformed->size() << std::endl;
     std::cout << "keypoints_1_withScale  :" << keypoints_1_withScale->size() << std::endl;
@@ -1687,6 +1791,13 @@ int main(int argc, char** argv) {
     keypoints_1=  iss3d(src_downsampled_1, SalientRad_muliplier_ISS, NonMaxMultiplier_ISS, Threshold21_ISS, Threshold32_ISS, setMinNeighbors_ISS, setNumberOfThreads_ISS);
     keypoints_2=  iss3d(tgt_downsampled_2_transformed, SalientRad_muliplier_ISS, NonMaxMultiplier_ISS, Threshold21_ISS, Threshold32_ISS, setMinNeighbors_ISS, setNumberOfThreads_ISS);
 
+    // Copying the pointwithscale to pointxyz so as visualize the cloud
+    pcl::PointCloud<pcl::PointXYZ>::Ptr keypoints_src_visualize_temp(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr keypoints_tgt_visualize_temp(new pcl::PointCloud<pcl::PointXYZ>);
+
+    pcl::copyPointCloud(*keypoints_1, *keypoints_src_visualize_temp);
+    pcl::copyPointCloud(*keypoints_2, *keypoints_tgt_visualize_temp);
+    std::cout << "keypoints_src_visualize_temp  :" << keypoints_src_visualize_temp->size() << std::endl;
 
     std::cout << "keypoints_1  :" << keypoints_1->size() << std::endl;
     std::cout << "keypoints_2 :" << keypoints_2->size() << std::endl;
@@ -1705,8 +1816,10 @@ int main(int argc, char** argv) {
 
     //todo maybe change the src_original to the downsampled version
     // normal extraction in omp
-    normals_1 = normal_extraction_omp( src_original, src_downsampled_1, normal_radius ); //works fine with the features
-    normals_2 = normal_extraction_omp( tgt_original, tgt_downsampled_2_transformed, normal_radius ); //works fine with the features
+    //normals_1 = normal_extraction_omp( src_original, src_downsampled_1, normal_radius ); //works fine with the features
+    //normals_2 = normal_extraction_omp( tgt_original, tgt_downsampled_2_transformed, normal_radius ); //works fine with the features
+    normals_1 = normal_extraction_omp( src_downsampled_1, src_downsampled_1, normal_radius ); //works fine with the features
+    normals_2 = normal_extraction_omp( tgt_downsampled_2_transformed, tgt_downsampled_2_transformed, normal_radius ); //works fine with the features
 
 
     //------------------------------------------------------------
@@ -1840,6 +1953,23 @@ int main(int argc, char** argv) {
 
     //--------------------------------------------------------
     // Find feature correspondences
+
+    //generate the evaluation cloud, which is transformed back to the original position to evalute the distance of the original point (only rotation and transformation, z-noise stays inside)
+    pcl::PointCloud<pcl::PointXYZ>::Ptr tgt_transformed_eval(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointWithScale>::Ptr keypoints_2_withScale_eval( new pcl::PointCloud<pcl::PointWithScale>() );
+    copyPointCloud(*keypoints_tgt_visualize_temp, *tgt_transformed_eval);
+    std::cout << "Derotation evaluation is on"  << std::endl;
+    if(roation_flag==1){
+        pcl::transformPointCloud (*tgt_transformed_eval, *tgt_transformed_eval, transform_1_inverse);
+        pcl::transformPointCloud (*keypoints_2_withScale, *keypoints_2_withScale_eval, transform_1_inverse);
+
+    }
+    for (std::size_t i = 0; i < tgt_transformed_eval->points.size (); ++i) {
+        tgt_transformed_eval->points[i].x -=x_o;
+        tgt_transformed_eval->points[i].y -=y_o;
+        tgt_transformed_eval->points[i].z -=z_o;
+    }
+
     std::vector<int> correspondences;
     std::vector<float> correspondence_scores;
 
@@ -1859,10 +1989,37 @@ int main(int argc, char** argv) {
     cout << "PFH All correspondences size: " << all_correspondences_PFH->size() << endl;
     cout << "PFH Good correspondences size: " << good_correspondences_PFH->size() << endl;
 
+
+
+
+    // a pointer to an int.
+    //int distance_bin_results_PFH[10];
+    double counter_correctFmatch_PFH, counter_wrongFmatch_PFH, counter_validationR_PFH;
+    //double validation_radius_in, validation_radius_out;
+    int arr[10]= {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    //distance_bin_results_PFH = correspondance_evaluation(good_correspondences_PFH, keypoints_src_visualize_temp, tgt_transformed_eval, &counter_correctFmatch_PFH, &counter_wrongFmatch_PFH, &counter_validationR_PFH, validation_radius_in, validation_radius_out);
+    int * distance_bin_results_PFH = correspondance_evaluation(good_correspondences_PFH, keypoints_1_withScale, keypoints_2_withScale_eval, counter_correctFmatch_PFH, counter_wrongFmatch_PFH, counter_validationR_PFH, validation_radius_in, validation_radius_out, arr);
+
+    if(1){
+        double evaluation_distances[9] = {0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 1};
+        //output the bin results
+        std::cout << "--------------------------FEATURE--------------------------------------"  << std::endl;
+        std::cout << "counter_correctFmatch" << counter_correctFmatch_PFH << std::endl;
+        std::cout << "counter_wrongFmatch" << counter_wrongFmatch_PFH << std::endl;
+        std::cout << "counter_validationR" << counter_validationR_PFH << std::endl;
+
+        std::cout << "bin results of the distance: " << std::endl;
+        std::cout << "bin 0 [0<=" << evaluation_distances [0] << "] :" << distance_bin_results_PFH[0]<< std::endl;
+        for(int counter=1;counter<9;counter++) {
+            std::cout << "bin " << counter << " [" << evaluation_distances [counter-1] << "<=" << evaluation_distances [counter] << "] :" << distance_bin_results_PFH[counter]<< std::endl;
+        }
+        std::cout << "bin 9 [" << evaluation_distances [8] << "<=...] :" << distance_bin_results_PFH[9]<< std::endl;
+    }
+
+
     // Find correspondences between keypoints in FPFH space
     pcl::CorrespondencesPtr all_correspondences_PFHRGB(new pcl::Correspondences);
     pcl::CorrespondencesPtr good_correspondences_PFHRGB(new pcl::Correspondences);
-
 
     findCorrespondences_PFHRGB(descrs_pfhrgb_1, descrs_pfhrgb_1, *all_correspondences_PFHRGB);
     //cout << "PFHRGB All correspondences size: " << all_correspondences_PFHRGB->size() << endl;
@@ -1870,6 +2027,11 @@ int main(int argc, char** argv) {
     cout << "End of rejectBadCorrespondences! " << endl;
     cout << "PFHRGB All correspondences size: " << all_correspondences_PFHRGB->size() << endl;
     cout << "PFHRGB Good correspondences size: " << good_correspondences_PFHRGB->size() << endl;
+
+
+    //correspondance_evaluation(good_correspondences_PFHRGB, keypoints_1_withScale, keypoints_2_withScale_eval, counter_correctFmatch_PFH, counter_wrongFmatch_PFH, counter_validationR_PFH, validation_radius_in, validation_radius_out);
+
+
 
     // PFHRGB Estimation
     pcl::PointCloud <pcl::PFHRGBSignature250>::Ptr fpfhs_src_rgb(new pcl::PointCloud<pcl::PFHRGBSignature250>);
@@ -1885,6 +2047,12 @@ int main(int argc, char** argv) {
     cout << "End of rejectBadCorrespondences! " << endl;
     cout << "NEW PFHRGB All correspondences size: " << all_correspondences_PFHRGB_new->size() << endl;
     cout << "NEW PFHRGB Good correspondences size: " << good_correspondences_PFHRGB_new->size() << endl;
+
+    // a pointer to an int.
+    //double validation_radius_in, validation_radius_out;
+    //distance_bin_results_PFH = correspondance_evaluation(good_correspondences_PFH, keypoints_src_visualize_temp, tgt_transformed_eval, &counter_correctFmatch_PFH, &counter_wrongFmatch_PFH, &counter_validationR_PFH, validation_radius_in, validation_radius_out);
+    //correspondance_evaluation(good_correspondences_PFHRGB_new, keypoints_1_withScale, keypoints_2_withScale_eval, counter_correctFmatch_PFH, counter_wrongFmatch_PFH, counter_validationR_PFH, validation_radius_in, validation_radius_out);
+
 
 
     pcl::CorrespondencesPtr all_correspondences_SHOT352(new pcl::Correspondences);
@@ -1981,22 +2149,6 @@ int main(int argc, char** argv) {
         corresp_viewer.setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 5, "keypoints_src_corresp_viewer");
     }
 
-    //generate the evaluation cloud, which is transformed back to the original position to evalute the distance of the original point (only rotation and transformation, z-noise stays inside)
-    pcl::PointCloud<pcl::PointXYZ>::Ptr tgt_transformed_eval(new pcl::PointCloud<pcl::PointXYZ>);
-    copyPointCloud(*keypoints_tgt_visualize_temp, *tgt_transformed_eval);
-    std::cout << "Derotation evaluation is on"  << std::endl;
-    /*
-    if(roation_flag==1){
-        pcl::transformPointCloud (*tgt_transformed_eval, *tgt_transformed_eval, transform_1_inverse);
-    }
-     */
-    for (std::size_t i = 0; i < tgt_transformed_eval->points.size (); ++i) {
-        tgt_transformed_eval->points[i].x -=x_o;
-        tgt_transformed_eval->points[i].y -=y_o;
-        tgt_transformed_eval->points[i].z -=z_o;
-    }
-
-
     //double evaluation_distances [10]; //distances between bins e.g. 0-<=0.1;0.1-<=0.2;.....
     double evaluation_distances[9] = {0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 1};
     int distance_bin_results[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -2008,55 +2160,6 @@ int main(int argc, char** argv) {
     pcl::PointXYZ tgt_transformed_tmp;  //descripes the target point in with the applied transformation in the new coordinate system
 
 
-
-    /*
-    for (int i = 0; i < good_correspondences->size(); ++i){
-        r=0;
-        g=0;
-        b=0;
-        pcl::PointXYZ & src_idx = keypoints_src_visualize_temp->points[(*good_correspondences)[i].index_query];
-        pcl::PointXYZ & tgt_idx = keypoints_tgt_visualize_temp->points[(*good_correspondences)[i].index_match];
-        pcl::PointXYZ & tgt_eval_idx = tgt_transformed_eval->points[(*good_correspondences)[i].index_match];
-        string lineID = to_string(i);
-
-        //move this to a seperate function later
-        //calc the distance for the bin evaluation
-        x_diff=src_idx.x-(tgt_eval_idx.x);
-        y_diff=src_idx.y-(tgt_eval_idx.y);
-        distance=std::sqrt(x_diff * x_diff + y_diff * y_diff);
-
-        for(int counter=0;counter<10;counter++){
-            if(distance <evaluation_distances [counter]){
-                distance_bin_results[counter]+=1;
-                break;
-            }else if(counter==9){
-                distance_bin_results[9]+=1;
-            }
-        }
-
-        if ((src_idx.x - tgt_eval_idx.x) * (src_idx.x - tgt_eval_idx.x) +(src_idx.y - tgt_eval_idx.y) * (src_idx.y - tgt_eval_idx.y) <= validation_radius_in * validation_radius_in){
-            g=255;
-            counter_correctFmatch++;
-        }else{
-            r=255;
-            counter_wrongFmatch++;
-
-            // check if the corresponding point is at least within a certain validation radius
-            if ((src_idx.x - tgt_eval_idx.x) * (src_idx.x - tgt_eval_idx.x) +(src_idx.y - tgt_eval_idx.y) * (src_idx.y - tgt_eval_idx.y) <= validation_radius_out * validation_radius_out){
-                counter_validationR++;
-                b=255;
-                r=0;
-            }
-        }
-
-        tgt_idx.z+=visu_dist;  // sift if temporary for the visual effect
-        if(grid_flag!=1) {
-            corresp_viewer.addLine<pcl::PointXYZ, pcl::PointXYZ>(src_idx, tgt_idx, r, g, b, lineID);
-        }
-        tgt_idx.z-=visu_dist;
-    }
-
-    */
     //add the virtual distance to the between the two clouds to make them better visual distinguishable
     for (std::size_t i = 0; i < tgt->points.size (); ++i) {
         tgt->points[i].z +=visu_dist;
@@ -2129,18 +2232,7 @@ int main(int argc, char** argv) {
 
         std::cout << "total Num of Overlapping Keypoints (coordinates): " << keypoint_Overlap_cnt << std::endl;
         std::cout << "Num Keypoints_1 in the region of interest fitting Keypoints_2 (coord): " << keypoint_Overlaparea_fit_cnt << std::endl;
-        double overlap_rate_1, overlap_rate_2, total_overlap_rate_1, total_overlap_rate_2;
-        overlap_rate_1= (double) keypoint_Overlaparea_fit_cnt / (double) keypoints_1_inOverlap;
-        std::cout << "Overlapping Rate of Keypoints 1: " << overlap_rate_1 << std::endl;
-        overlap_rate_2= (double) keypoint_Overlaparea_fit_cnt / (double) keypoints_2_inOverlap;
-        std::cout << "Overlapping Rate of Keypoints 2: " << overlap_rate_2 << std::endl;
-        total_overlap_rate_1= (double) keypoint_Overlap_cnt / (double) keypoints_src_visualize_temp->size();
-        std::cout << "Total Overlapping Rate of Keypoints 1: " << total_overlap_rate_1 << std::endl;
-        total_overlap_rate_2= (double) keypoint_Overlap_cnt / (double) keypoints_tgt_visualize_temp->size();
-        std::cout << "Total Overlapping Rate of Keypoints 2: " << total_overlap_rate_2 << std::endl;
         std::cout << "----------------------------------------------------------------"  << std::endl;
-
-
 
 
         if (exists_file (measure_file_str) ){
@@ -2150,23 +2242,14 @@ int main(int argc, char** argv) {
             //add the header in the csv file
             out << "src_file," << "tgt_file," << "Src_points," << "Tgt-points,"<< "noise_offest,"<<"noise_stdv,"<< "x_o," << "y_o," << "z_o,"<<"keypoint_method,"<<"Red,"<<"Green,"<<"Blue,"<<"Jetstatus,"<<"Stacked_height_threshold,"<<"min_scale_SIFT,"<<"nr_octaves_SIFT,"<<"nr_scales_per_octave_SIFT,"<<"min_contrast_SIFT,"<<"set_radius_harris,"<<"set_radius_search_harris,"<<"HarrisRosponseMethod,___,";
             out << "comp_time[s]," ;
-
-            out <<"keypoints_1_inOverlap,"<<"keypoints_2_inOverlap,"<<"Total_Keypoints_1,"<<"Total_Keypoints_2,"<<"keypoint_Overlap_cnt,"<<"keypoint_Overlaparea_fit_cnt,"<<"overlap_rate_1,"<<"overlap_rate_2,"<<"total_overlap_rate_1,"<<"total_overlap_rate_2"<<std::endl;
-
+            out <<"keypoints_1_inOverlap,"<<"keypoints_2_inOverlap,"<<"Total_Keypoints_1,"<<"Total_Keypoints_2,"<<"keypoint_Overlap_cnt,"<<"keypoint_Overlaparea_fit_cnt"<<std::endl;
         }
 
         //add measurment conditions
         out <<  src_file<< "," << tgt_file<<  ","<<src_original->points.size()<< "," << tgt_transformed->points.size() <<"," <<noise_offset<<"," <<noise_var<<"," <<x_o<<"," <<y_o<<"," <<z_o<<"," <<keypoint_method<<"," <<red<<"," <<green<<"," <<blue<<"," <<jet_flag<<"," <<jet_stacking_threshold<<"," <<min_scale_SIFT<<"," <<nr_octaves_SIFT<<"," <<nr_scales_per_octave_SIFT<<"," <<min_contrast_SIFT<<"," <<set_radius_harris<<"," <<set_radius_search_harris<<","<<HarrisRosponseMethod;
-        /*
-        if (result.count("method"))    {
-            out  << "," << result["method"].as<std::string>();
-        }else{
-            out << "," <<"SWIFT" ;
-        }
-*/
         out <<",___,";
         double time_elapsed_computation=0; //todo enter here the time needed for the calculation
-        out << time_elapsed_computation << ","<< keypoints_1_inOverlap<< "," << keypoints_2_inOverlap <<","<< keypoints_src_visualize_temp->size()<< "," << keypoints_tgt_visualize_temp->size() <<","<<keypoint_Overlap_cnt<<","<< keypoint_Overlaparea_fit_cnt<<","<< overlap_rate_1<<"," << overlap_rate_2<<","<< total_overlap_rate_1<<","<< total_overlap_rate_2<<std::endl;
+        out << time_elapsed_computation << ","<< keypoints_1_inOverlap<< "," << keypoints_2_inOverlap <<","<< keypoints_src_visualize_temp->size()<< "," << keypoints_tgt_visualize_temp->size() <<","<<keypoint_Overlap_cnt<<","<< keypoint_Overlaparea_fit_cnt<<std::endl;
 
 
         //std::cout<<"jet_stacking_threshold: " << jet_stacking_threshold<<std::endl;
@@ -2198,21 +2281,7 @@ int main(int argc, char** argv) {
         out << "Stacked height threshold: |" << jet_stacking_threshold << std::endl;
         out << "---"  << std::endl;
         */
-/*
-        out << "Elasped computation time in seconds: " << time_elapsed_computation << endl;
-        out << "Good correspondences size: " << good_correspondences->size() << endl;
-        out << "exact matched features: " << counter_correctFmatch << std::endl;
-        out << "features in the validation region: " << counter_validationR << std::endl;
-        out << "Overlapping Rate of exact matching features: " << exact_match_rate << std::endl;
-        out << "Overlapping Rate features in the validation range: " << evaluation_match_rate << std::endl;
-        out << "with validation radius in: " << validation_radius_in << std::endl;
-        out << "with validation radius out: " << validation_radius_out << std::endl;
-        //std::cout << "bin results of the distance: " << std::endl;
-        out << "bin 0 [0<=" << evaluation_distances [0] << "] :" << distance_bin_results[0]<< std::endl;
-        for(int counter=1;counter<9;counter++) {out << "bin " << counter << " [" << evaluation_distances [counter-1] << "<=" << evaluation_distances [counter] << "] :" << distance_bin_results[counter]<< std::endl;}
-        out << "bin 9 [" << evaluation_distances [8] << "<=...] :" << distance_bin_results[9]<< std::endl;
-        out << "--------------------end measurement--------------------"  << std::endl;
-        */
+
     }else{
         while (!corresp_viewer.wasStopped()) {
             corresp_viewer.spinOnce();
