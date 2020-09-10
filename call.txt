@@ -1,0 +1,2 @@
+./test_bench_features --noiseoff=0.0 --noisestdv=0.1 --method=SIFT --feature_method=SHOT --grid=1 -j 2 --staked_height=30 --input_filename_1=../../data/cloud_overlap_1.pcd --input_filename_2=../../data/cloud_overlap_2.pcd --output_filename=../measurements/Feature_test.csv --cloud_filter_flag=0 --alpha=0.0 --omp_on_flag=1 --RANSAC_Iterations=5000 --RANSAC_Inlier_Threshold=1. --validation_in=0.1
+

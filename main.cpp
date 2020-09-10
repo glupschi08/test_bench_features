@@ -167,8 +167,8 @@ using namespace std;
 //#define feature_radius 5.25//3.25  //0.25
 
 
-#define RANSAC_Inlier_Threshold 3.//3.//1.5 //0.1
-#define RANSAC_Iterations 5000
+//#define RANSAC_Inlier_Threshold 3.//3.//1.5 //0.1
+//#define RANSAC_Iterations 5000
 #define CorrRejDist_Maximum_Distance 5
 #define ICP_Max_Correspondence_Distance 0.15
 //--------------------------------
@@ -731,7 +731,9 @@ void find_feature_correspondences_shapeContext (pcl::PointCloud<pcl::ShapeContex
 void rejectBadCorrespondences(const pcl::CorrespondencesPtr &all_correspondences,
                               const pcl::PointCloud<pcl::PointWithScale>::Ptr &keypoints_src,
                               const pcl::PointCloud<pcl::PointWithScale>::Ptr &keypoints_tgt,
-                              pcl::Correspondences &remaining_correspondences)
+                              pcl::Correspondences &remaining_correspondences,
+                              double RANSAC_Inlier_Threshold,
+                              int RANSAC_Iterations)
 {
     // copy only XYZRGB data of keypoints for use in estimating features
     pcl::PointCloud <pcl::PointXYZRGB>::Ptr keypoints_src_xyzrgb(new pcl::PointCloud <pcl::PointXYZRGB>);
@@ -1444,6 +1446,8 @@ int main(int argc, char** argv) {
 
     //Parameter for Feature descriptor methods
     int omp_on_flag = 0; //set to on for parallel computing of certain parameter
+    double RANSAC_Inlier_Threshold = 3.0;//3.//1.5 //0.1 for Correspndance Rejection
+    int RANSAC_Iterations = 5000;   //for Correspndance Rejection
     double GradientEstimationsetRadiusSearch_RIFT = 5; //1000.001
     double RadiusSearch_RIFT = 5.25;//100.05
     double NrDistanceBins_RIFT = 4;
@@ -1466,7 +1470,7 @@ int main(int argc, char** argv) {
     double LocalRadiusSearch_USC = 5.25;
     double setRadiusSearch_SHOT = 5.25;
 
-
+    //here are all possible input parameter listed
     cxxopts::Options options("test", "A brief description");
     options.add_options()
             ("e,validation_in",
@@ -1506,6 +1510,11 @@ int main(int argc, char** argv) {
              cxxopts::value<std::string>())
             ("omp_on_flag", "use parallel computing to speed up the calculation (for SHOT, CSHOT, FPFH)",
              cxxopts::value<int>(omp_on_flag)->default_value("0"))
+            ("RANSAC_Inlier_Threshold", "Parameter for Correspondance Rejection",
+             cxxopts::value<double>(RANSAC_Inlier_Threshold)->default_value("3.0"))
+            ("RANSAC_Iterations", "Parameter for Correspondance Rejection",
+             cxxopts::value<int>(RANSAC_Iterations)->default_value("5000"))
+
             ("GradientEstimationsetRadiusSearch_RIFT", "Parameter for RIFT",
              cxxopts::value<double>(GradientEstimationsetRadiusSearch_RIFT)->default_value("5.0"))
             ("RadiusSearch_RIFT", "Parameter for RIFT",
@@ -1978,7 +1987,7 @@ int main(int argc, char** argv) {
         findCorrespondences_ShapeContext1980(descrs_ShapeContext1980_1, descrs_ShapeContext1980_2,
                                              *all_correspondences_ShapeContext1980);
         rejectBadCorrespondences(all_correspondences_ShapeContext1980, keypoints_1_withScale, keypoints_2_withScale,
-                                 *good_correspondences_ShapeContext1980);
+                                 *good_correspondences_ShapeContext1980,RANSAC_Inlier_Threshold, RANSAC_Iterations);
         cout << "End of rejectBadCorrespondences! " << endl;
         cout << "ShapeContext1980 All correspondences size: " << all_correspondences_ShapeContext1980->size() << endl;
         cout << "ShapeContext1980 Good correspondences size: " << good_correspondences_ShapeContext1980->size() << endl;
@@ -1990,6 +1999,11 @@ int main(int argc, char** argv) {
                                                                    counter_correctFmatch_3DSC, counter_wrongFmatch_3DSC,
                                                                    counter_validationR_3DSC, validation_radius_in,
                                                                    validation_radius_out, arr);
+
+
+
+        //feature_evaluation_and_recording(arr[0], counter_wrongFmatch, counter_validationR, src_file, tgt_file, noise_offset, noise_var, x_o, y_o, z_o, keypoint_method, jet_flag, jet_stacking_threshold, submap_overlap, distance_bin_results,src_original_size, tgt_original_size, keypoints_tgt_visualize_temp, keypoints_src_visualize_temp, grid_flag, measure_file_str, SalientRad_muliplier_ISS, NonMaxMultiplier_ISS, Threshold21_ISS, Threshold32_ISS, setMinNeighbors_ISS, time_elapsed_computation, num_good_correspondances, exact_match_rate, evaluation_match_rate, validation_radius_in, validation_radius_out)
+
 
     }
     if (feature_method == "USC" || feature_method == "ALL") {
@@ -2018,7 +2032,7 @@ int main(int argc, char** argv) {
                                                    *all_correspondences_UniqueShapeContext1960);
         cout << "before  rejectBadCorrespondences" << endl;
         rejectBadCorrespondences(all_correspondences_UniqueShapeContext1960, keypoints_1_withScale,
-                                 keypoints_2_withScale, *good_correspondences_UniqueShapeContext1960);
+                                 keypoints_2_withScale, *good_correspondences_UniqueShapeContext1960,RANSAC_Inlier_Threshold, RANSAC_Iterations);
         cout << "End of rejectBadCorrespondences! " << endl;
         cout << "UniqueShapeContext1960 All correspondences size: "
              << all_correspondences_UniqueShapeContext1960->size() << endl;
@@ -2050,7 +2064,7 @@ int main(int argc, char** argv) {
         pcl::CorrespondencesPtr good_correspondences_PrincipalRadiiRSD(new pcl::Correspondences);
         findCorrespondences_PrincipalRadiiRSD(descrs_rsd_1, descrs_rsd_2, *all_correspondences_PrincipalRadiiRSD);
         rejectBadCorrespondences(all_correspondences_PrincipalRadiiRSD, keypoints_1_withScale, keypoints_2_withScale,
-                                 *good_correspondences_PrincipalRadiiRSD);
+                                 *good_correspondences_PrincipalRadiiRSD,RANSAC_Inlier_Threshold, RANSAC_Iterations);
         cout << "End of rejectBadCorrespondences! " << endl;
         cout << "PrincipalRadiiRSD All correspondences size: " << all_correspondences_PrincipalRadiiRSD->size() << endl;
         cout << "PrincipalRadiiRSD Good correspondences size: " << good_correspondences_PrincipalRadiiRSD->size()
@@ -2082,7 +2096,7 @@ int main(int argc, char** argv) {
             pcl::CorrespondencesPtr good_correspondences_SHOT352(new pcl::Correspondences);
             findCorrespondences_SHOT352(descrs_shot_1, descrs_shot_2, *all_correspondences_SHOT352);
             rejectBadCorrespondences(all_correspondences_SHOT352, keypoints_1_withScale, keypoints_2_withScale,
-                                     *good_correspondences_SHOT352);
+                                     *good_correspondences_SHOT352,RANSAC_Inlier_Threshold, RANSAC_Iterations);
             cout << "End of rejectBadCorrespondences! " << endl;
             cout << "SHOT352 All correspondences size: " << all_correspondences_SHOT352->size() << endl;
             cout << "SHOT352 Good correspondences size: " << good_correspondences_SHOT352->size() << endl;
@@ -2113,7 +2127,7 @@ int main(int argc, char** argv) {
             pcl::CorrespondencesPtr good_correspondences_SHOT352(new pcl::Correspondences);
             findCorrespondences_SHOT352(descrs_shot_omp_1, descrs_shot_omp_2, *all_correspondences_SHOT352);
             rejectBadCorrespondences(all_correspondences_SHOT352, keypoints_1_withScale, keypoints_2_withScale,
-                                     *good_correspondences_SHOT352);
+                                     *good_correspondences_SHOT352,RANSAC_Inlier_Threshold, RANSAC_Iterations);
             cout << "End of rejectBadCorrespondences! " << endl;
             cout << "SHOT352 All correspondences size: " << all_correspondences_SHOT352->size() << endl;
             cout << "SHOT352 Good correspondences size: " << good_correspondences_SHOT352->size() << endl;
@@ -2146,7 +2160,7 @@ int main(int argc, char** argv) {
             pcl::CorrespondencesPtr good_correspondences_SHOT1344(new pcl::Correspondences);
             findCorrespondences_SHOT1344(descrs_cshot_1, descrs_cshot_2, *all_correspondences_SHOT1344);
             rejectBadCorrespondences(all_correspondences_SHOT1344, keypoints_1_withScale, keypoints_2_withScale,
-                                     *good_correspondences_SHOT1344);
+                                     *good_correspondences_SHOT1344,RANSAC_Inlier_Threshold, RANSAC_Iterations);
             cout << "End of rejectBadCorrespondences! " << endl;
             cout << "SHOT1344 All correspondences size: " << all_correspondences_SHOT1344->size() << endl;
             cout << "SHOT1344 Good correspondences size: " << good_correspondences_SHOT1344->size() << endl;
@@ -2177,7 +2191,7 @@ int main(int argc, char** argv) {
             pcl::CorrespondencesPtr good_correspondences_SHOT1344(new pcl::Correspondences);
             findCorrespondences_SHOT1344(descrs_cshot_omp_1, descrs_cshot_omp_2, *all_correspondences_SHOT1344);
             rejectBadCorrespondences(all_correspondences_SHOT1344, keypoints_1_withScale, keypoints_2_withScale,
-                                     *good_correspondences_SHOT1344);
+                                     *good_correspondences_SHOT1344,RANSAC_Inlier_Threshold, RANSAC_Iterations);
             cout << "End of rejectBadCorrespondences! " << endl;
             cout << "SHOT1344 All correspondences size: " << all_correspondences_SHOT1344->size() << endl;
             cout << "SHOT1344 Good correspondences size: " << good_correspondences_SHOT1344->size() << endl;
@@ -2211,7 +2225,8 @@ int main(int argc, char** argv) {
             pcl::CorrespondencesPtr all_correspondences_FPFHSignature33(new pcl::Correspondences);
             pcl::CorrespondencesPtr good_correspondences_FPFHSignature33(new pcl::Correspondences);
             findCorrespondences_FPFHSignature33(descrs_fpfh_1, descrs_fpfh_2,*all_correspondences_FPFHSignature33);
-            rejectBadCorrespondences(all_correspondences_FPFHSignature33, keypoints_1_withScale, keypoints_2_withScale,*good_correspondences_FPFHSignature33);
+            //findCorrespondences_FPFHSignature33(descrs_fpfh_1, descrs_fpfh_2,*all_correspondences_FPFHSignature33);
+            rejectBadCorrespondences(all_correspondences_FPFHSignature33, keypoints_1_withScale, keypoints_2_withScale,*good_correspondences_FPFHSignature33,RANSAC_Inlier_Threshold, RANSAC_Iterations);
             cout << "End of rejectBadCorrespondences! " << endl;
             cout << "FPFHSignature33 All correspondences size: " << all_correspondences_FPFHSignature33->size() << endl;
             cout << "FPFHSignature33 Good correspondences size: " << good_correspondences_FPFHSignature33->size()
@@ -2229,28 +2244,27 @@ int main(int argc, char** argv) {
         }
         if (omp_on_flag == 1 || omp_on_flag == 2) {
             pcl::PointCloud<pcl::FPFHSignature33>::Ptr descrs_fpfh_omp_1(new pcl::PointCloud<pcl::FPFHSignature33>());
-            descrs_fpfh_omp_1 = fpfh_extraction_omp(src_downsampled_1, keypoints_1, normals_1,
-                                                    searchRadius_FPFH);//cloud, keypoints, normals
+            descrs_fpfh_omp_1 = fpfh_extraction_omp(src_downsampled_1, keypoints_1, normals_1, searchRadius_FPFH);//cloud, keypoints, normals
             pcl::console::print_value("FPFH_OMP_1 returned features %d \n", descrs_fpfh_omp_1->size());
 
             pcl::PointCloud<pcl::FPFHSignature33>::Ptr descrs_fpfh_omp_2(new pcl::PointCloud<pcl::FPFHSignature33>());
-            descrs_fpfh_omp_2 = fpfh_extraction_omp(tgt_downsampled_2_transformed, keypoints_2, normals_2,
-                                                    searchRadius_FPFH);//cloud, keypoints, normals
+            descrs_fpfh_omp_2 = fpfh_extraction_omp(tgt_downsampled_2_transformed, keypoints_2, normals_2, searchRadius_FPFH);//cloud, keypoints, normals
             pcl::console::print_value("FPFH_OMP_2 returned features %d \n", descrs_fpfh_omp_2->size());
 
-            pcl::CorrespondencesPtr all_correspondences_FPFHSignature33(new pcl::Correspondences);
-            pcl::CorrespondencesPtr good_correspondences_FPFHSignature33(new pcl::Correspondences);
-            findCorrespondences_FPFHSignature33(src_downsampled_1, descrs_fpfh_omp_2,*all_correspondences_FPFHSignature33);
-            rejectBadCorrespondences(all_correspondences_FPFHSignature33, keypoints_1_withScale, keypoints_2_withScale,
-                                     *good_correspondences_FPFHSignature33);
+            pcl::CorrespondencesPtr all_correspondences_FPFHSignature33_omp(new pcl::Correspondences);
+            pcl::CorrespondencesPtr good_correspondences_FPFHSignature33_omp(new pcl::Correspondences);
+            //findCorrespondences_FPFHSignature33(src_downsampled_1, descrs_fpfh_omp_2,*all_correspondences_FPFHSignature33_omp);
+            findCorrespondences_FPFHSignature33(descrs_fpfh_omp_1, descrs_fpfh_omp_2,*all_correspondences_FPFHSignature33_omp);
+            rejectBadCorrespondences(all_correspondences_FPFHSignature33_omp, keypoints_1_withScale, keypoints_2_withScale,
+                                     *good_correspondences_FPFHSignature33_omp,RANSAC_Inlier_Threshold, RANSAC_Iterations);
             cout << "End of rejectBadCorrespondences! " << endl;
-            cout << "FPFHSignature33 All correspondences size: " << all_correspondences_FPFHSignature33->size() << endl;
-            cout << "FPFHSignature33 Good correspondences size: " << good_correspondences_FPFHSignature33->size()
+            cout << "FPFHSignature33 All correspondences size: " << all_correspondences_FPFHSignature33_omp->size() << endl;
+            cout << "FPFHSignature33 Good correspondences size: " << good_correspondences_FPFHSignature33_omp->size()
                  << endl;
 
             double counter_correctFmatch_FPFH, counter_wrongFmatch_FPFH, counter_validationR_FPFH;
             int arr[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-            int *distance_bin_results_FPFH = correspondance_evaluation(good_correspondences_FPFHSignature33,
+            int *distance_bin_results_FPFH = correspondance_evaluation(good_correspondences_FPFHSignature33_omp,
                                                                        keypoints_1_withScale,
                                                                        keypoints_2_withScale_eval,
                                                                        counter_correctFmatch_FPFH,
@@ -2279,7 +2293,7 @@ int main(int argc, char** argv) {
         findCorrespondences_PFH_newshort(descrs_pfh_1, descrs_pfh_2, *all_correspondences_PFH);
         pcl::CorrespondencesPtr good_correspondences_PFH(new pcl::Correspondences);
         rejectBadCorrespondences(all_correspondences_PFH, keypoints_1_withScale, keypoints_2_withScale,
-                                 *good_correspondences_PFH);
+                                 *good_correspondences_PFH,RANSAC_Inlier_Threshold, RANSAC_Iterations);
         cout << "PFH All correspondences size: " << all_correspondences_PFH->size() << endl;
         cout << "PFH Good correspondences size: " << good_correspondences_PFH->size() << endl;
 
@@ -2309,7 +2323,7 @@ int main(int argc, char** argv) {
         findCorrespondences_PFHRGB(descrs_pfhrgb_1, descrs_pfhrgb_1, *all_correspondences_PFHRGB);
         //cout << "PFHRGB All correspondences size: " << all_correspondences_PFHRGB->size() << endl;
         rejectBadCorrespondences(all_correspondences_PFHRGB, keypoints_1_withScale, keypoints_2_withScale,
-                                 *good_correspondences_PFHRGB);
+                                 *good_correspondences_PFHRGB,RANSAC_Inlier_Threshold, RANSAC_Iterations);
         cout << "End of rejectBadCorrespondences! " << endl;
         cout << "PFHRGB All correspondences size: " << all_correspondences_PFHRGB->size() << endl;
         cout << "PFHRGB Good correspondences size: " << good_correspondences_PFHRGB->size() << endl;
@@ -2341,7 +2355,7 @@ int main(int argc, char** argv) {
         pcl::CorrespondencesPtr good_correspondences_PFHRGB_new(new pcl::Correspondences);
         findCorrespondences_PFHRGB(new_pfdrgb_1, new_pfdrgb_2, *all_correspondences_PFHRGB_new);
         rejectBadCorrespondences(all_correspondences_PFHRGB_new, keypoints_1_withScale, keypoints_2_withScale,
-                                 *good_correspondences_PFHRGB_new);
+                                 *good_correspondences_PFHRGB_new,RANSAC_Inlier_Threshold, RANSAC_Iterations);
         cout << "End of rejectBadCorrespondences! " << endl;
         cout << "NEW PFHRGB All correspondences size: " << all_correspondences_PFHRGB_new->size() << endl;
         cout << "NEW PFHRGB Good correspondences size: " << good_correspondences_PFHRGB_new->size() << endl;
